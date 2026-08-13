@@ -122,3 +122,25 @@ console.log(model.stats.truncated, model.stats.scroll.stopReason);
   その場合は同じ範囲を再走査することになる（ID で重複排除されるので結果は壊れないが、時間はかかる）。
 - そのため `expandReplies` の既定は **false** のまま。使うときは明示的に `true` を指定する運用にしてある。
   false のままでも、取れなかった返信は `replyGaps` と `truncated` で必ず報告される。
+
+---
+
+## 課題: 返信スレッドの回収は未検証（2026-08-13 時点・対応保留）
+
+**状態: 保留（利用者判断）。** 実装はあるが実機で動かしていない。急ぐ必要が無いため、当面は
+`expandReplies: false`（既定）で運用する。取りこぼした返信は黙って消えるのではなく、
+出力 Markdown 冒頭の警告・`replyGaps`・`truncated: true` に必ず出るので、実害は
+「返信本文が入らない」ことに留まる。
+
+再開するときに確認すべきことは以下。順番もこのとおりでよい。
+
+1. 低機密のチャネルで `window.TEAMS_COLLECT = { expandReplies: true }` を指定して実行する。
+2. **スレッドが Esc で閉じたか**（`reply-thread-not-closed` 警告が出ていないか）。
+   出ていれば、閉じるボタンの `data-tid` を採取して `selectors.json` の `threadPaneClose` に足す。
+   それだけで直る作りにしてある。
+3. **閉じたあとスクロールが続いたか**（`pane-lost` / `pane-reacquired` 警告の有無）。
+   `pane-lost` が出るようなら、会話ペインの再取得が間に合っていない。
+4. `replyGaps` が空になり、`truncated` が返信起因では立たなくなること。
+5. 所要時間。スレッドを開くたびに待機が入るため、既定の上限（20 周・90 秒）では足りない。
+
+関連する未確定事項は上の「残っている不確かさ」を参照。
