@@ -229,7 +229,9 @@ DOM サンプルには材料が無かったため、実機のコンソールで�
 - `createdTime` は **`messageId` と同じ値**だった。
 - `parentMessageId` は実装が出した値と一致していた（親の解決は正しい）。
 - `teamName` / `channelName` は表示名なので付けない（会話は `threadId` で一意に決まる）。
-- `tenantId` / `groupId` は DOM 内の取得元が未確定。`window.TEAMS_COLLECT = { tenantId, groupId }` で渡せる。
+- **`tenantId` / `groupId` は無くてもリンクが開くことを実機で確認済み**（2026-08-13）。
+  そのため DOM からの取得は追わない。開かない環境（複数テナント所属など）向けに
+  `window.TEAMS_COLLECT = { tenantId, groupId }` で渡せる逃げ道だけ用意してある。
 
 - `messageId` は既存の `data-mid`、`parentId` は返信なら親投稿の ID、投稿本体なら自分自身。
 - パス部の `19:…@thread.tacv2` はエスケープしない（実物のリンクが生のまま）。

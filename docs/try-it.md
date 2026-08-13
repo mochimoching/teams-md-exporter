@@ -27,7 +27,8 @@ window.TEAMS_COLLECT = { expandReplies: true };
 ```
 
 各メッセージの見出しには、Teams の該当メッセージを開くリンク `[🔗](…)` が付く。
-リンクが Teams アプリで開かない場合は、`tenantId` / `groupId` を明示する（チャネルで要る場合がある）:
+通常は設定不要（チャネルで開けることを確認済み）。もし Teams アプリで開かない場合は、
+`tenantId` / `groupId` を明示する:
 
 ```js
 window.TEAMS_COLLECT = { tenantId: '…', groupId: '…' };
