@@ -1,0 +1,219 @@
+{
+  "version": "2.0.0",
+  "generatedFrom": {
+    "reports": [
+      "docs/teams-calibration.md（2026-08-05 / channel / 8 件）",
+      "docs/dom-samples/teams-dom-samples_channel_2026-08-06-18-*.md（4 ファイル / 58 件）",
+      "docs/dom-samples/teams-dom-samples_chat_2026-08-06-1*.md（2 ファイル / 13 件）"
+    ],
+    "origin": "https://teams.microsoft.com/v2/",
+    "uiLanguage": "ja-JP",
+    "coverage": "channel 66 件 / chat 13 件。送信者・日時・本文はいずれも 100%（node tools/check-samples.js で再確認できる）"
+  },
+  "note": "値は CSS セレクタ文字列、または優先順に試すセレクタの配列。class 名は難読化されており不安定なため使用しない（data-tid / role / id 接頭辞 / itemtype / aria-* のみ）。根拠と確度は _meta を参照。",
+
+  "profiles": {
+    "channel": {
+      "conversationPane": ["[data-tid='channel-pane-viewport']", "[data-tid='message-pane-body']"],
+
+      "messageBox": "[data-tid='channel-pane-message']",
+      "postRoot": "[id^='post-message-renderer-']",
+      "replyContainer": "[data-tid='response-surface']",
+
+      "messageUnit": "[role='group'][id^='message-body-']",
+      "messageUnitIdPrefix": "message-body-",
+      "messageIdHost": "[data-mid]",
+      "messageIdAttr": "data-mid",
+      "parentIdHost": "[data-reply-chain-id]",
+      "parentIdAttr": "data-reply-chain-id",
+
+      "idTemplates": {
+        "author": "author-{mid}",
+        "timestamp": "timestamp-{mid}",
+        "subject": "subject-line-{mid}",
+        "body": "content-{mid}",
+        "edited": "edited-{mid}",
+        "deleted": "tombstone-{mid}",
+        "attachmentContainer": "attachments-{mid}",
+        "replySummaryButton": "response-summary-{mid}"
+      },
+
+      "author": ["[id^='author-']", "[data-tid='post-message-subheader'] span[id]", "[data-tid='reply-message-header'] span[id]"],
+      "timestamp": "time[data-tid='timestamp']",
+      "timestampAttr": ["datetime", "aria-label"],
+      "subject": "[data-tid='subject-line']",
+      "body": ["[data-tid='message-body']", "[data-message-content]"],
+
+      "reactionSummary": ["[data-tid='channel-message-reaction-summary']", "[data-tid='diverse-reaction-summary']"],
+      "reactionPill": "[data-tid='diverse-reaction-pill-button']",
+      "reactionEmoji": ["[data-tid='emoticon-renderer'] img[alt]", "img[itemtype*='Emoji'][alt]", "img[alt][data-tid^='custom-emoji']"],
+      "reactionLabelRefAttr": "aria-labelledby",
+      "emojiIdAttr": "itemid",
+
+      "edited": "[id^='edited-']",
+      "editedTimeAttr": "title",
+      "deleted": "[id^='tombstone-']",
+
+      "attachmentContainer": "[data-tid='file-attachment-grid']",
+      "attachmentItem": "[role='group'][aria-label]",
+      "attachmentNameAttr": "aria-label",
+      "attachmentTitle": "[data-testid='content-card-custom-title']",
+      "attachmentTitleAttr": "aria-label",
+      "attachmentCountAttr": "numberoffiles",
+      "attachmentLink": "a[href]",
+
+      "deepLinkGrid": "[data-tid='deeplink-attachment-grid']",
+      "deepLinkItem": "[data-tid^='deep-link-chiclet']",
+
+      "linkPreview": "[data-tid='url-preview']",
+      "linkPreviewTitle": ["[data-tid='url-preview-body'] span[title]", "[data-tid='url-preview-body'] span"],
+      "linkPreviewLink": "a[href]",
+
+      "mention": "span[itemtype='http://schema.skype.com/Mention']",
+      "mentionWrapper": "[data-mention-type]",
+      "mentionIdAttr": "data-person-mri",
+      "emoji": "img[itemtype='http://schema.skype.com/Emoji']",
+      "customEmoji": "img[itemtype='http://schema.skype.com/CustomEmoji']",
+      "link": "a[href]",
+      "codeBlockLanguage": "[data-tid='code-block-editor-deserialized-language']",
+
+      "unsupported": {
+        "adaptive-card": ["[data-testid='componentUXWrapperTestId']", "[data-tid='adaptive-card']"],
+        "url-preview": "[data-tid='url-preview']"
+      },
+      "collapsedBody": ["[id^='see-more-container']", "[data-testid^='see-more-container']"],
+      "expandBodyButton": "[id^='see-more-container'] button",
+      "expandRepliesButton": "[data-tid='response-summary-button']",
+      "threadPane": "[data-tid='message-pane-list-viewport']",
+      "threadPaneScroller": "[data-tid='message-pane-list-viewport']",
+      "threadPaneClose": [],
+      "threadProfile": "chat",
+      "loadingIndicator": ["[role='progressbar']", "[aria-busy='true']"],
+
+      "systemMessage": [],
+      "ignoreInBody": ["[data-tid='message-extension-card-footer']", "[data-tid='image-placeholder-container']", "[data-tid='code-block-editor-deserialized-header']", "[aria-live]", "[role='progressbar']"]
+    },
+
+    "chat": {
+      "conversationPane": ["[data-tid='message-pane-list-viewport']", "[data-tid='message-pane-body']"],
+
+      "messageBox": "[data-tid='chat-pane-item']:has([data-tid='chat-pane-message'])",
+      "postRoot": [],
+      "replyContainer": [],
+
+      "messageUnit": "[data-tid='chat-pane-item']:has([data-tid='chat-pane-message'])",
+      "messageUnitIdPrefix": "message-body-",
+      "messageIdHost": "[data-mid]",
+      "messageIdAttr": "data-mid",
+      "parentIdHost": [],
+      "parentIdAttr": "data-reply-chain-id",
+
+      "idTemplates": {
+        "author": "author-{mid}",
+        "timestamp": "timestamp-{mid}",
+        "subject": "subject-line-{mid}",
+        "body": "content-{mid}",
+        "edited": "edited-{mid}",
+        "attachmentContainer": "attachments-{mid}"
+      },
+
+      "author": ["[data-tid='message-author-name']", "[id^='author-']"],
+      "timestamp": ["time[id^='timestamp-']", "time[data-tid='timestamp']", "time"],
+      "timestampAttr": ["datetime", "aria-label", "title"],
+      "subject": "[data-tid='subject-line']",
+      "body": ["[data-message-content]", "[data-tid='message-body']"],
+
+      "reactionSummary": "[data-tid='diverse-reaction-summary']",
+      "reactionPill": "[data-tid='diverse-reaction-pill-button']",
+      "reactionEmoji": ["[data-tid='emoticon-renderer'] img[alt]", "img[itemtype*='Emoji'][alt]", "img[alt][data-tid^='custom-emoji']"],
+      "reactionLabelRefAttr": "aria-labelledby",
+      "emojiIdAttr": "itemid",
+
+      "edited": "[id^='edited-']",
+      "editedTimeAttr": "title",
+      "deleted": [],
+
+      "attachmentContainer": "[data-tid='file-attachment-grid']",
+      "attachmentItem": "[role='group'][aria-label]",
+      "attachmentNameAttr": "aria-label",
+      "attachmentTitle": "[data-testid='content-card-custom-title']",
+      "attachmentTitleAttr": "aria-label",
+      "attachmentCountAttr": "numberoffiles",
+      "attachmentLink": "a[href]",
+
+      "deepLinkGrid": "[data-tid='deeplink-attachment-grid']",
+      "deepLinkItem": "[data-tid^='deep-link-chiclet']",
+
+      "linkPreview": "[data-tid='url-preview']",
+      "linkPreviewTitle": ["[data-tid='url-preview-body'] span[title]", "[data-tid='url-preview-body'] span"],
+      "linkPreviewLink": "a[href]",
+
+      "mention": "span[itemtype='http://schema.skype.com/Mention']",
+      "mentionWrapper": "[data-mention-type]",
+      "mentionIdAttr": "data-person-mri",
+      "emoji": "img[itemtype='http://schema.skype.com/Emoji']",
+      "customEmoji": "img[itemtype='http://schema.skype.com/CustomEmoji']",
+      "link": "a[href]",
+      "codeBlockLanguage": "[data-tid='code-block-editor-deserialized-language']",
+
+      "unsupported": {
+        "adaptive-card": ["[data-testid='componentUXWrapperTestId']", "[data-tid='adaptive-card']"],
+        "url-preview": "[data-tid='url-preview']"
+      },
+      "collapsedBody": ["[id^='see-more-container']", "[data-testid^='see-more-container']"],
+      "expandBodyButton": "[id^='see-more-container'] button",
+      "expandRepliesButton": [],
+      "loadingIndicator": ["[role='progressbar']", "[aria-busy='true']"],
+
+      "systemMessage": "[data-tid='control-message-renderer']",
+      "ignoreInBody": ["[data-tid='message-extension-card-footer']", "[data-tid='image-placeholder-container']", "[data-tid='code-block-editor-deserialized-header']", "[aria-live]", "[role='progressbar']"]
+    }
+  },
+
+  "patterns": {
+    "timestampAriaLabel": "^\\s*(\\d{4})年(\\d{1,2})月(\\d{1,2})日\\s+(\\d{1,2}):(\\d{2})\\s*$",
+    "timestampTextShort": "^\\s*(\\d{1,2})/(\\d{1,2})\\s+(\\d{1,2}):(\\d{2})\\s*$",
+    "timestampYesterday": "^\\s*昨日の?\\s*(\\d{1,2}):(\\d{2})\\s*$",
+    "timestampToday": "^\\s*(?:今日の?\\s*)?(\\d{1,2}):(\\d{2})\\s*$",
+    "editedAbsolute": "(\\d{4})年(\\d{1,2})月(\\d{1,2})日\\s+(\\d{1,2}):(\\d{2})",
+    "editedRelative": "(今日|昨日)の?\\s*(\\d{1,2}):(\\d{2})",
+    "reactionLabel": "^\\s*(\\d+)\\s*件の\\s*(.+?)\\s*リアクション",
+    "replyCountLabel": "(\\d+)\\s*件の返信",
+    "attachmentCountLabel": "(\\d+)\\s*[つ個件]",
+    "attachmentUrl": "(https?://\\S+)\\s*$",
+    "hiddenStyle": "display\\s*:\\s*none",
+    "skipImageUrl": "^blob:"
+  },
+
+  "_meta": {
+    "confirmed": {
+      "conversationPane": "祖先要素の採取で確定。channel は [data-tid='channel-pane-viewport']、chat は [data-tid='message-pane-list-viewport'] が実際にスクロールする要素（4 回の channel 採取・1 回の chat 採取すべてで一致）。共通の外枠として [data-tid='message-pane-body'] が両方に存在するのでフォールバックに入れてある。",
+      "messageBox(channel)": "[data-tid='channel-pane-message']。1 箱＝1 リプライチェーン（親投稿＋返信）。",
+      "messageUnit(channel)": "[role='group'][id^='message-body-']。channel 4 ファイル・実メッセージ 61 件で送信者・日時・本文の取得率 97%（欠落 2 件は連続投稿でヘッダが省略されたケース＝下記 grouped-message）。",
+      "messageUnit(chat)": "chat の 1 メッセージは [data-tid='chat-pane-item']（外側のラッパ）。送信者 [data-tid='message-author-name'] と <time> はこのラッパ直下にあり、[data-tid='chat-pane-message']（本文・添付・リアクションを含む箱）の外側にある。なおアバター用に入れ子の chat-pane-item が現れるため、:has([data-tid='chat-pane-message']) で本物だけを選ぶ。",
+      "timestamp(chat)": "chat の <time> には datetime='2026-08-06T05:42:24.704Z'（UTC・秒つき）があり、これが最も正確。channel の <time> には datetime が無く data-tid='timestamp' + aria-label のみ、という非対称がある。",
+      "codeBlock": "<pre itemid='codeBlockEditor-…'><code>行1<br>行2…</code></pre>。**改行は <br>**、インデントは &nbsp;。textContent を使うと 1 行に潰れる。言語名は <pre> ではなく直前の兄弟にある [data-tid='code-block-editor-deserialized-language']（表示は 'Plain Text' 等）。このヘッダは本文テキストに混ざるので ignoreInBody に入れてある。",
+      "body(chat)": "chat の本文には data-tid='message-body' が付かない。id='content-{mid}' と data-message-content のみ。したがって body は両方を候補に持つ必要がある。",
+      "attachment": "確定。[data-tid='file-attachment-grid'][id='attachments-{mid}'][aria-label='メッセージに添付ファイルが N つあります。'] の中に、ファイルごとの [role='group'][aria-label='{ファイル名}'][numberoffiles='N'] がある。URL は a[href] ではなく [data-testid='content-card-custom-title'] の aria-label 末尾に '{ファイル名} {URL}' の形で入っている（channel 4 件 / chat 1 件すべてで一致）。",
+      "reactionSummary": "channel は [data-tid='channel-message-reaction-summary'] だが chat にはこのラッパーが無く [data-tid='diverse-reaction-summary'] から始まる。pill 以下は共通。",
+      "mentionWrapper": "[data-mention-type] の値は person / tag / channel の 3 種を確認。いずれも data-person-mri を持つ（tag は 'tsRigp5CA' 形式、channel は '19:…@thread.tacv2'）ので、MRI 一致でメンションの結合可否を判定できる。なお同じ属性がヘッダのアバターにも付くが、本文要素だけを走査するため影響しない。",
+      "inlineCode": "本文中の <code>（インラインコード）を channel サンプルで確認。<p> 直下に置かれる。",
+      "table": "chat サンプルで <table><tbody><tr><td> の素の表を確認（属性による装飾なし）。",
+      "urlPreview": "[data-tid='url-preview']。リンクのカード型プレビュー。本文のリンクと重複するため未対応要素として畳む。",
+      "edited": "span[id='edited-{mid}'] に「編集済み」。**メッセージ本体（data-mid の箱）の外側・メッセージ単位の内側**にあり、採取スクリプトが本体だけを見ていたため当初 0 件と誤報告していた（実際は 22 件）。title 属性に「2026年8月4日 17:06 に編集しました」「今日の 14:00 に編集しました」「更新済み 今日の 9:49」の形で編集時刻が入るので、editedAt として ISO 化できる（22/22 で成功）。",
+      "codeBlockLanguage": "コードブロックの言語名は <pre> ではなく直前の兄弟のヘッダ [data-tid='code-block-editor-deserialized-language']（表示は 'Plain Text' 等）にある。",
+      "deepLink": "[data-tid='deeplink-attachment-grid'] はタブ等へのディープリンクで、ファイル添付（file-attachment-grid）とは別物。id が attachments-deeplink-{mid} なので、添付コンテナを id 接頭辞で引くと誤検出する（実際に attachment-unrecognized 警告が出た）。添付は file-attachment-grid に限定し、ディープリンクは deepLinks として別に拾う。"
+    },
+    "corrected": {
+      "collapsedBody": "「詳細を表示」の入れ物 [id='see-more-container'] は折りたたまれていないメッセージにも常に存在する（全 60 個中、実際に折りたたみ中なのは 28 個）。区別はインライン style の display:none だけで、意味的属性の差は無い（aria-expanded は常に false）。そのためセレクタは素のままにして、判定は patterns.hiddenStyle をコード側で当てる方式にした。",
+      "attachmentLink": "初版の a[href] は誤り。添付グリッド内にアンカーは存在しない。上記の aria-label 方式に変更（a[href] はフォールバックとして残置）。",
+      "card→unsupported": "カード類は 1 種類ではないため、ラベル→セレクタの対応表 unsupported に一般化した（adaptive-card / url-preview）。§6.3 に従い <!-- 未対応要素: {ラベル} --> として残す。"
+    },
+    "unverified": {
+      "systemMessage": "出力対象外の方針（既定で除外）。chat に [data-tid='control-message-renderer'] という箱があることは確認済みだが中身は未採取。除外件数だけ stats.systemExcluded に残す。",
+      "deleted": "削除済み（tombstone-{mid}）は全サンプルで未観測のまま。採取不要の方針だが、id 接頭辞セレクタは残してあり、実要素が現れればフラグが立つ。chat の aria-labelledby には tombstone が無く、削除表示の作りが channel と異なる可能性がある。",
+      "inlineImage": "本文に貼られた画像は <img src='blob:…'> で、alt もファイル名も無い。blob: URL は保存後に無効になるため、patterns.skipImageUrl に一致する画像は <!-- 未対応要素: 画像 --> として残す（リンクとしては出さない）。"
+    },
+    "policy": "class 属性は難読化されているため一切使用していない。data-testid は Teams 内部のテスト用属性で data-tid ほどの安定性が確認できないため、メッセージ本体の抽出（ID・送信者・日時・本文）には使わず、補助用途（添付の URL・カードの外枠・collapsedBody のフォールバック）に留めた。これらが外れても本文抽出は壊れず、警告が増えるだけで済む設計にしてある。"
+  }
+}

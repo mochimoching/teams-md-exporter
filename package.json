@@ -1,0 +1,15 @@
+{
+  "name": "teams-md-exporter",
+  "version": "0.1.0",
+  "description": "Teams Web の表示内容から会話履歴を Markdown に書き出すツール（方式A）。抽出コアは DOM ルート要素を受け取る純粋関数。",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/",
+    "build": "node tools/build-console-script.js",
+    "check-samples": "node tools/check-samples.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}

@@ -1,0 +1,330 @@
+/**
+ * 正規化（抽出結果 → 仕様書 §5 の中間データモデル）。
+ *
+ * 純粋関数。DOM にも時計にも触れない（capturedAt は呼び出し側が渡す）。
+ * 文字列 → 型（ISO 日時 / 件数）の変換はここに集約する。
+ */
+
+import { compilePatterns, normalizeSpace } from './selector-utils.js';
+
+const TOOL_VERSION = '0.1.0';
+
+/**
+ * @param {object} extraction extractConversation() の戻り値
+ * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy }
+ * @param {object} options { patterns, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
+ * @returns {{source: object, participants: Array, messages: Array, stats: object, warnings: Array}}
+ */
+export function normalize(extraction, meta = {}, options = {}) {
+  const patterns = compilePatterns(options.patterns || {});
+  const offset = options.timezoneOffset || '+09:00';
+  const warnings = [...(extraction.warnings || [])];
+
+  const seen = new Map();
+  const messages = [];
+
+  for (const raw of extraction.messages || []) {
+    if (seen.has(raw.id)) {
+      warnings.push({ level: 'info', code: 'duplicate-message', messageId: raw.id, detail: '重複メッセージを除外しました' });
+      continue;
+    }
+    seen.set(raw.id, true);
+
+    const ts = toIsoTimestamp(raw.timestamp, patterns, {
+      offset,
+      assumeYear: options.assumeYear,
+      capturedAt: meta.capturedAt,
+    });
+    // 日時要素そのものが無い場合は抽出側で timestamp-missing を出しているので、ここでは重複させない
+    const hasTimestampSource = Boolean(
+      raw.timestamp && (raw.timestamp.text || Object.keys(raw.timestamp.attributes || {}).length > 0),
+    );
+    if (!ts.iso && hasTimestampSource) {
+      warnings.push({
+        level: 'warn',
+        code: ts.code || 'timestamp-unparsed',
+        messageId: raw.id,
+        detail: ts.detail || `日時を ISO 8601 に変換できませんでした（生値: ${JSON.stringify(raw.timestamp)}）`,
+      });
+    }
+
+    // 編集時刻は「2026年8月4日 17:06 に編集しました」「今日の 14:00 に編集しました」「更新済み 今日の 9:49」など表記が揺れる
+    const editedAt = parseEditedAt(raw.editedTitle, patterns, offset, meta.capturedAt);
+    if (raw.edited && raw.editedTitle && !editedAt.iso) {
+      warnings.push({
+        level: 'info',
+        code: 'edited-time-unparsed',
+        messageId: raw.id,
+        detail: `編集時刻を解釈できませんでした（生値: ${JSON.stringify(raw.editedTitle)}）`,
+      });
+    }
+
+    const reactions = (raw.reactions || []).map((r) => {
+      const parsed = parseReaction(r, patterns);
+      if (parsed.count == null) {
+        warnings.push({
+          level: 'info',
+          code: 'reaction-count-unparsed',
+          messageId: raw.id,
+          detail: `リアクション件数を解釈できませんでした（生値: ${JSON.stringify(r.label)}）`,
+        });
+      }
+      return parsed;
+    });
+
+    messages.push({
+      id: raw.id,
+      parentId: raw.parentId ?? null,
+      author: raw.author || null,
+      authorInherited: Boolean(raw.authorInherited),
+      timestamp: ts.iso,
+      timestampRaw: ts.iso ? undefined : raw.timestamp,
+      timestampPrecision: raw.timestampInherited ? 'inherited' : ts.precision,
+      editedAt: editedAt.iso,
+      edited: Boolean(raw.edited),
+      deleted: Boolean(raw.deleted),
+      subject: raw.subject || null,
+      bodyMarkdown: raw.bodyMarkdown || '',
+      reactions,
+      attachments: raw.attachments || [],
+      linkPreviews: raw.linkPreviews || [],
+      deepLinks: raw.deepLinks || [],
+      cards: raw.cards || [],
+      system: Boolean(raw.system),
+      _domOrder: raw.domOrder ?? 0,
+    });
+  }
+
+  // システムメッセージ（参加/退出/名称変更など）は既定で出力しない（仕様書 §9 の選択肢）。
+  // ただし「何件落としたか」は必ず残す（黙って消さない）。
+  const includeSystem = options.includeSystem === true;
+  const systemMessages = messages.filter((m) => m.system);
+  const kept = includeSystem ? messages : messages.filter((m) => !m.system);
+  if (!includeSystem && systemMessages.length > 0) {
+    warnings.push({
+      level: 'info',
+      code: 'system-messages-excluded',
+      detail: `システムメッセージ ${systemMessages.length} 件を出力から除外しました（options.includeSystem: true で含められます）`,
+    });
+  }
+  kept.sort(byTimestampThenDomOrder);
+
+  const boxes = extraction.boxes || [];
+  const replyGaps = [];
+  for (const box of boxes) {
+    const declared = parseFirstInt(box.replyCountLabel, patterns.replyCountLabel);
+    if (declared != null && declared > box.replyCountExtracted) {
+      replyGaps.push({ boxId: box.boxId, declared, extracted: box.replyCountExtracted });
+      warnings.push({
+        level: 'warn',
+        code: 'replies-not-expanded',
+        detail: `${box.boxId || 'box'}: 返信 ${declared} 件のうち ${box.replyCountExtracted} 件しか DOM に出ていません（スレッドを開いて再取得が必要）`,
+      });
+    }
+  }
+
+  const truncated =
+    Boolean(options.truncated) ||
+    replyGaps.length > 0 ||
+    warnings.some((w) => w.code === 'collapsed-body');
+
+  const stamps = kept.map((m) => m.timestamp).filter(Boolean).sort();
+  const parents = new Set(kept.map((m) => m.parentId).filter(Boolean));
+
+  const model = {
+    source: {
+      kind: meta.kind || null,
+      team: meta.team || null,
+      channel: meta.channel || null,
+      chatTitle: meta.chatTitle || null,
+      url: meta.url || null,
+      capturedAt: meta.capturedAt || null,
+      capturedBy: meta.capturedBy || null,
+      toolVersion: meta.toolVersion || TOOL_VERSION,
+    },
+    participants: uniqueAuthors(kept).map((displayName) => ({ displayName })),
+    messages: kept.map(stripInternal),
+    stats: {
+      messageCount: kept.length,
+      threadCount: parents.size,
+      rangeStart: stamps[0] || null,
+      rangeEnd: stamps[stamps.length - 1] || null,
+      systemExcluded: includeSystem ? 0 : systemMessages.length,
+      truncated,
+      replyGaps,
+      warningCount: warnings.length,
+      fatalCount: warnings.filter((w) => w.level === 'fatal').length,
+    },
+    warnings,
+  };
+
+  if (!meta.capturedAt) {
+    warnings.push({ level: 'info', code: 'captured-at-missing', detail: 'meta.capturedAt が未指定です（呼び出し側で現在時刻を渡してください）' });
+  }
+  return model;
+}
+
+/* ------------------------------------------------------------------ */
+
+function stripInternal(message) {
+  const copy = { ...message };
+  delete copy._domOrder;
+  if (copy.timestampRaw === undefined) delete copy.timestampRaw;
+  return copy;
+}
+
+function byTimestampThenDomOrder(a, b) {
+  if (a.timestamp && b.timestamp && a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;
+  return a._domOrder - b._domOrder;
+}
+
+function uniqueAuthors(messages) {
+  const set = new Set();
+  for (const m of messages) if (m.author) set.add(m.author);
+  return Array.from(set);
+}
+
+/**
+ * 日時の ISO 8601 化。
+ * 優先順: datetime 属性（機械可読） > aria-label（「2026年7月23日 15:56」「昨日の 19:18」）> 表示テキスト（「07/23 15:56」「13:47」）。
+ * Teams の <time> には datetime 属性が無かった（キャリブレーション時点）ため、実際は aria-label が主経路。
+ * 直近のメッセージは「昨日の 19:18」「13:47」のような相対表記になり、
+ * 基準日（meta.capturedAt）が無いと日付を決められない。その場合は勝手に埋めず null にして警告する。
+ * 秒は DOM に存在しないため常に :00（precision='minute'）。
+ */
+export function toIsoTimestamp(timestamp, patterns, options = {}) {
+  const { offset = '+09:00', assumeYear = null, capturedAt = null } = options;
+  const attrs = (timestamp && timestamp.attributes) || {};
+  const text = timestamp && timestamp.text;
+  const candidates = [attrs['aria-label'], text].filter(Boolean).map(normalizeSpace);
+
+  // chat の <time> には datetime="2026-08-06T05:42:24.704Z"（UTC・秒つき）がある。
+  // 最も正確な情報源なので最優先で使い、出力タイムゾーンに合わせて整形する。
+  const datetime = attrs.datetime;
+  if (datetime) {
+    const parsed = new Date(datetime);
+    if (!Number.isNaN(parsed.getTime())) {
+      return { iso: formatWithOffset(parsed, offset), precision: 'second' };
+    }
+  }
+
+  for (const value of candidates) {
+    // 2026年7月23日 15:56
+    let m = patterns.timestampAriaLabel && patterns.timestampAriaLabel.exec(value);
+    if (m) {
+      const [, y, mo, d, h, mi] = m;
+      return { iso: `${pad(y, 4)}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:00${offset}`, precision: 'minute' };
+    }
+
+    // 昨日の 19:18 / 13:47（今日）— 基準日が要る
+    for (const [key, shift, precision] of [
+      ['timestampYesterday', -1, 'minute-relative'],
+      ['timestampToday', 0, 'minute-relative'],
+    ]) {
+      m = patterns[key] && patterns[key].exec(value);
+      if (!m) continue;
+      const baseDate = capturedAt ? String(capturedAt).slice(0, 10) : null;
+      if (!baseDate || !/^\d{4}-\d{2}-\d{2}$/.test(baseDate)) {
+        return {
+          iso: null,
+          precision: null,
+          code: 'timestamp-relative-unresolved',
+          detail: `「${value}」は相対表記のため、meta.capturedAt（取得日時）が無いと日付を決められません`,
+        };
+      }
+      const [, h, mi] = m;
+      return { iso: `${shiftDate(baseDate, shift)}T${pad(h)}:${pad(mi)}:00${offset}`, precision };
+    }
+
+    // 07/23 15:56（年が無い）
+    m = patterns.timestampTextShort && patterns.timestampTextShort.exec(value);
+    if (m) {
+      const [, mo, d, h, mi] = m;
+      const year = assumeYear || (capturedAt ? String(capturedAt).slice(0, 4) : null);
+      if (!year) {
+        return {
+          iso: null,
+          precision: null,
+          code: 'timestamp-year-unknown',
+          detail: `表示テキスト「${value}」には年が含まれていません（options.assumeYear か meta.capturedAt が必要）`,
+        };
+      }
+      return { iso: `${pad(year, 4)}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:00${offset}`, precision: 'minute-assumed-year' };
+    }
+  }
+
+  return { iso: null, precision: null };
+}
+
+/** 編集時刻の title を ISO 8601 にする。相対表記（今日/昨日）は capturedAt を基準にする */
+function parseEditedAt(title, patterns, offset, capturedAt) {
+  if (!title) return { iso: null };
+  const text = normalizeSpace(title);
+
+  const abs = patterns.editedAbsolute && patterns.editedAbsolute.exec(text);
+  if (abs) {
+    const [, y, mo, d, h, mi] = abs;
+    return { iso: `${pad(y, 4)}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:00${offset}` };
+  }
+
+  const rel = patterns.editedRelative && patterns.editedRelative.exec(text);
+  if (rel) {
+    const baseDate = capturedAt ? String(capturedAt).slice(0, 10) : null;
+    if (!baseDate || !/^\d{4}-\d{2}-\d{2}$/.test(baseDate)) return { iso: null };
+    const [, word, h, mi] = rel;
+    const date = word === '昨日' ? shiftDate(baseDate, -1) : baseDate;
+    return { iso: `${date}T${pad(h)}:${pad(mi)}:00${offset}` };
+  }
+  return { iso: null };
+}
+
+/** UTC の Date を、指定オフセット（例 '+09:00'）付きの ISO 8601 文字列にする */
+function formatWithOffset(date, offset) {
+  const m = /^([+-])(\d{2}):(\d{2})$/.exec(offset);
+  if (!m) return date.toISOString();
+  const sign = m[1] === '-' ? -1 : 1;
+  const minutes = sign * (Number(m[2]) * 60 + Number(m[3]));
+  const shifted = new Date(date.getTime() + minutes * 60000);
+  return `${shifted.toISOString().slice(0, 19)}${offset}`;
+}
+
+/** 'YYYY-MM-DD' を days 日ずらす（タイムゾーン変換はしない純粋な日付計算） */
+function shiftDate(isoDate, days) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const shifted = new Date(Date.UTC(y, m - 1, d) + days * 86400000);
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+}
+
+/**
+ * 「1 件の いいね! リアクション。」→ { type: 'いいね!', typeId: 'yes', count: 1, emoji: '👍' }
+ * type は UI 言語依存の表示名、typeId は img[itemid] 由来の言語非依存の識別子。
+ */
+export function parseReaction(reaction, patterns) {
+  const label = reaction && reaction.label ? normalizeSpace(reaction.label) : null;
+  const result = {
+    type: null,
+    typeId: reaction ? reaction.emojiId || null : null,
+    count: null,
+    emoji: reaction ? reaction.emoji || null : null,
+    label,
+  };
+  if (label && patterns.reactionLabel) {
+    const m = patterns.reactionLabel.exec(label);
+    if (m) {
+      result.count = Number(m[1]);
+      result.type = m[2];
+    }
+  }
+  if (!result.type) result.type = result.emoji;
+  return result;
+}
+
+function parseFirstInt(text, pattern) {
+  if (!text || !pattern) return null;
+  const m = pattern.exec(normalizeSpace(text));
+  return m ? Number(m[1]) : null;
+}
+
+function pad(value, width = 2) {
+  return String(value).padStart(width, '0');
+}
