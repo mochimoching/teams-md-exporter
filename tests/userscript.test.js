@@ -45,9 +45,21 @@ function mount(paneHtml, { paneTid = 'channel-pane-viewport', globals = {} } = {
   window.HTMLAnchorElement.prototype.click = function stubClick() { downloads.push(this.download); };
   Object.assign(window, globals);
 
+  // Teams は Trusted Types を有効にしていて innerHTML への代入が拒否される。
+  // 実機で UI が出なかった原因なので、同じ条件を作って再発を防ぐ。
+  const errors = [];
+  window.console.error = (...args) => errors.push(args.map(String).join(' '));
+  for (const proto of [window.Element.prototype, window.ShadowRoot.prototype]) {
+    Object.defineProperty(proto, 'innerHTML', {
+      configurable: true,
+      get() { return ''; },
+      set() { throw new TypeError("Failed to set the 'innerHTML' property: This document requires 'TrustedHTML' assignment."); },
+    });
+  }
+
   window.eval(script);
   const host = window.document.getElementById('teams-md-exporter');
-  return { window, downloads, host, ui: host && host.shadowRoot };
+  return { window, downloads, errors, host, ui: host && host.shadowRoot };
 }
 
 /** UI の表示が落ち着くまで待つ（収集は非同期） */
@@ -69,6 +81,14 @@ test('ユーザースクリプトのヘッダが正しく、構文的にも問�
   assert.ok(!/^import /m.test(script), 'import 文が残っている');
   assert.ok(!/^export /m.test(script), 'export 文が残っている');
   new Function(script); // 構文エラー・名前の衝突はここで落ちる
+});
+
+test('innerHTML を使っていない（Trusted Types 環境でも UI が出る）', () => {
+  assert.ok(!/\.innerHTML\s*=/.test(script), 'innerHTML への代入が残っている');
+  const { host, ui, errors } = mount(channelHtml());
+  assert.ok(host, `UI が差し込まれていない: ${errors.join(' / ')}`);
+  assert.ok(ui.querySelector('.run'), '実行ボタンが無い');
+  assert.deepEqual(errors, []);
 });
 
 test('読み込んだだけでは何も収集しない（勝手に走らない）', async () => {

@@ -13,9 +13,26 @@ npm run build     # src/ と selectors.json から dist/ を作り直す
 2. 拡張のアイコン → **新規スクリプトを追加**
 3. エディタの中身を全部消して、`dist/teams-md-exporter.user.js` の中身を貼る
 4. `Ctrl+S` で保存
-5. Teams Web（`https://teams.microsoft.com/`）を開き直す
+5. **Chrome の設定を 2 つ確認する**（下記）
+6. Teams Web（`https://teams.microsoft.com/`）を開き直す
 
 右下に **📥 会話を Markdown で保存** が出ていれば入っている。
+
+### Chrome 側の設定（実機でつまずいた箇所）
+
+`chrome://extensions` → Tampermonkey → **詳細**:
+
+| 設定 | 必要な状態 | これが原因のときの症状 |
+|---|---|---|
+| **ユーザースクリプトを許可** | ON | スクリプトが一切動かない |
+| **サイトへのアクセス** | すべてのサイト、または `https://teams.microsoft.com` | アイコンに「このページへのアクセス権なし」 |
+
+（「ユーザースクリプトを許可」が見当たらない場合は、同じ画面右上の「デベロッパーモード」を ON にすると出る）
+
+設定を変えたら **Teams のページを再読み込み**すること。Tampermonkey のアイコンにバッジ `1` が出ていれば、
+そのページでスクリプトが動いている。
+
+なお **Teams デスクトップアプリでは動かない**（拡張機能が入らないため）。ブラウザで開くこと。
 
 > 更新するときは、同じスクリプトを開いて中身を貼り替えて保存し直す。
 > `@version` はビルド時に `package.json` の版から入る。
@@ -70,6 +87,15 @@ window.TEAMS_SAVE_JSON = true;                                    // 中間デ�
 
 中身（収集・変換・出力）は完全に同じものを共有している（`tools/browser-runtime.js`）。
 拡張を入れずに一度だけ試すならコンソール版、常用するならユーザースクリプト版。
+
+## 実装上の制約（触るときの注意）
+
+**Teams は Trusted Types（`require-trusted-types-for`）を有効にしている。**
+そのため `innerHTML` への代入は `TypeError` で拒否される。UI を触るときは `createElement` と
+`textContent` だけで組み立てること（`tools/userscript-ui.js`）。
+`tests/userscript.test.js` が Trusted Types 環境を再現して機械的に検査している。
+
+差し込みに失敗した場合は黙って消えず、コンソールに `[teams-md] UI を差し込めませんでした` が出る。
 
 ## 保存したファイルの扱い
 
