@@ -48,7 +48,7 @@ test('selectors.json のセレクタは意味的属性（data-* / role / id / it
 
   const allowedAttrs = new Set([
     'data-tid', 'data-testid', 'data-mid', 'data-reply-chain-id', 'data-message-content',
-    'data-mention-type', 'data-person-mri', 'role', 'id', 'itemtype', 'itemid',
+    'data-mention-type', 'data-person-mri', 'data-track-thread-id', 'role', 'id', 'itemtype', 'itemid',
     'aria-live', 'aria-label', 'aria-busy', 'aria-expanded', 'alt', 'href', 'type', 'title', 'numberoffiles',
   ]);
 

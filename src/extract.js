@@ -113,6 +113,62 @@ export function extractConversation(rootEl, selectors, options = {}) {
   return { profile: profileName, messages, boxes: boxInfos, warnings };
 }
 
+/**
+ * いま開いている会話の ID（threadId）を DOM から読む。個々のメッセージへのリンク生成に使う。
+ *
+ * 目的の属性は会話ペインの外（入力欄の送信ボタンなど）にあるため、
+ * 呼び出し側が広い検索ルート（ブラウザでは document.body 相当）を明示的に渡す。
+ * ここでも document / window には触れない。
+ *
+ * ページ全体を正規表現で探す方式は使えない。左一覧に載っている全会話の ID や、
+ * 本文に貼られた他会話へのリンク由来の ID が大量に混ざるため（selectors.json の _meta 参照）。
+ * 「いま開いている会話に紐づく要素」だけを設定のセレクタで指名して読むこと。
+ *
+ * @param {Element} searchRoot 検索の起点。root 自身も候補に含む
+ * @param {object} selectors selectors.json をパースしたもの
+ * @param {object} options { profile?: string }
+ * @returns {{threadId: string|null, warnings: Array}}
+ */
+export function extractConversationId(searchRoot, selectors, options = {}) {
+  const profileName = options.profile || 'channel';
+  const sel = selectors && selectors.profiles ? selectors.profiles[profileName] : null;
+  const warnings = [];
+
+  if (!searchRoot || searchRoot.nodeType !== 1) {
+    throw new TypeError('extractConversationId: searchRoot に DOM 要素を渡してください');
+  }
+  if (!sel || isUnset(sel.conversationIdHost) || !sel.conversationIdAttr) {
+    warnings.push({
+      level: 'warn',
+      code: 'conversation-id-selector-unset',
+      detail: `selectors.profiles.${profileName}.conversationIdHost / conversationIdAttr が未設定のため、会話 ID を取得できません`,
+    });
+    return { threadId: null, warnings };
+  }
+
+  const found = querySelfOrAll(searchRoot, sel.conversationIdHost)
+    .map((el) => normalizeSpace(attr(el, sel.conversationIdAttr)))
+    .filter(Boolean);
+  const unique = [...new Set(found)];
+
+  if (unique.length === 0) {
+    warnings.push({
+      level: 'warn',
+      code: 'conversation-id-not-found',
+      detail: '会話 ID を持つ要素が見つかりませんでした（入力欄が無い会話か、DOM 構造が変わった可能性があります）',
+    });
+    return { threadId: null, warnings };
+  }
+  if (unique.length > 1) {
+    warnings.push({
+      level: 'warn',
+      code: 'conversation-id-ambiguous',
+      detail: `会話 ID の候補が ${unique.length} 種類見つかりました（${unique.join(' / ')}）。先頭を採用しますが、リンク先が誤っている可能性があります`,
+    });
+  }
+  return { threadId: unique[0], warnings };
+}
+
 /* ------------------------------------------------------------------ */
 
 function extractBox(box, sel, ctx) {

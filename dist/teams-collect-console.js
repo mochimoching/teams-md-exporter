@@ -16,6 +16,8 @@
  *   window.TEAMS_COLLECT = { expandReplies: true };
  * 保存せず結果だけ見たいとき:
  *   window.TEAMS_SAVE_MD = false;
+ * 各メッセージへのリンクにテナント ID を付けるとき（複数テナントに所属している場合に有効）:
+ *   window.TEAMS_COLLECT = { tenantId: '（自組織のテナント ID）' };
  *
  * 行うのは会話ペインのスクロールと「詳細を表示」の展開だけです。
  * 認証情報には触れず、ネットワークへ送信もしません（CLAUDE.md 原則1・2）。
@@ -616,6 +618,62 @@ function extractConversation(rootEl, selectors, options = {}) {
   return { profile: profileName, messages, boxes: boxInfos, warnings };
 }
 
+/**
+ * いま開いている会話の ID（threadId）を DOM から読む。個々のメッセージへのリンク生成に使う。
+ *
+ * 目的の属性は会話ペインの外（入力欄の送信ボタンなど）にあるため、
+ * 呼び出し側が広い検索ルート（ブラウザでは document.body 相当）を明示的に渡す。
+ * ここでも document / window には触れない。
+ *
+ * ページ全体を正規表現で探す方式は使えない。左一覧に載っている全会話の ID や、
+ * 本文に貼られた他会話へのリンク由来の ID が大量に混ざるため（selectors.json の _meta 参照）。
+ * 「いま開いている会話に紐づく要素」だけを設定のセレクタで指名して読むこと。
+ *
+ * @param {Element} searchRoot 検索の起点。root 自身も候補に含む
+ * @param {object} selectors selectors.json をパースしたもの
+ * @param {object} options { profile?: string }
+ * @returns {{threadId: string|null, warnings: Array}}
+ */
+function extractConversationId(searchRoot, selectors, options = {}) {
+  const profileName = options.profile || 'channel';
+  const sel = selectors && selectors.profiles ? selectors.profiles[profileName] : null;
+  const warnings = [];
+
+  if (!searchRoot || searchRoot.nodeType !== 1) {
+    throw new TypeError('extractConversationId: searchRoot に DOM 要素を渡してください');
+  }
+  if (!sel || isUnset(sel.conversationIdHost) || !sel.conversationIdAttr) {
+    warnings.push({
+      level: 'warn',
+      code: 'conversation-id-selector-unset',
+      detail: `selectors.profiles.${profileName}.conversationIdHost / conversationIdAttr が未設定のため、会話 ID を取得できません`,
+    });
+    return { threadId: null, warnings };
+  }
+
+  const found = querySelfOrAll(searchRoot, sel.conversationIdHost)
+    .map((el) => normalizeSpace(attr(el, sel.conversationIdAttr)))
+    .filter(Boolean);
+  const unique = [...new Set(found)];
+
+  if (unique.length === 0) {
+    warnings.push({
+      level: 'warn',
+      code: 'conversation-id-not-found',
+      detail: '会話 ID を持つ要素が見つかりませんでした（入力欄が無い会話か、DOM 構造が変わった可能性があります）',
+    });
+    return { threadId: null, warnings };
+  }
+  if (unique.length > 1) {
+    warnings.push({
+      level: 'warn',
+      code: 'conversation-id-ambiguous',
+      detail: `会話 ID の候補が ${unique.length} 種類見つかりました（${unique.join(' / ')}）。先頭を採用しますが、リンク先が誤っている可能性があります`,
+    });
+  }
+  return { threadId: unique[0], warnings };
+}
+
 /* ------------------------------------------------------------------ */
 
 function extractBox(box, sel, ctx) {
@@ -1073,14 +1131,16 @@ const TOOL_VERSION = '0.1.0';
 
 /**
  * @param {object} extraction extractConversation() の戻り値
- * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy }
- * @param {object} options { patterns, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
+ * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy, threadId }
+ * @param {object} options { patterns, permalink?, tenantId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
  * @returns {{source: object, participants: Array, messages: Array, stats: object, warnings: Array}}
  */
 function normalize(extraction, meta = {}, options = {}) {
   const patterns = compilePatterns(options.patterns || {});
   const offset = options.timezoneOffset || '+09:00';
   const warnings = [...(extraction.warnings || [])];
+  const permalinkConfig = options.permalink || null;
+  const threadId = meta.threadId || null;
 
   const seen = new Map();
   const messages = [];
@@ -1137,6 +1197,13 @@ function normalize(extraction, meta = {}, options = {}) {
     messages.push({
       id: raw.id,
       parentId: raw.parentId ?? null,
+      permalink: buildPermalink(permalinkConfig, {
+        threadId,
+        messageId: raw.id,
+        // Teams のディープリンクは投稿本体でも parentMessageId を要求する（親は自分自身）
+        parentId: raw.parentId ?? raw.id,
+        tenantId: options.tenantId || null,
+      }),
       author: raw.author || null,
       authorInherited: Boolean(raw.authorInherited),
       timestamp: ts.iso,
@@ -1171,6 +1238,18 @@ function normalize(extraction, meta = {}, options = {}) {
   }
   kept.sort(byTimestampThenDomOrder);
 
+  // リンクを付けられなかったことは黙って隠さない（原則4）。会話 ID が取れなかったのが唯一の原因。
+  const withPermalink = kept.filter((m) => m.permalink).length;
+  if (permalinkConfig && kept.length > 0 && withPermalink === 0) {
+    warnings.push({
+      level: 'warn',
+      code: 'permalink-unavailable',
+      detail: threadId
+        ? 'メッセージ ID が取れないため、個々のメッセージへのリンクを作れませんでした'
+        : '会話 ID（threadId）が取れないため、個々のメッセージへのリンクを作れませんでした',
+    });
+  }
+
   const boxes = extraction.boxes || [];
   const replyGaps = [];
   for (const box of boxes) {
@@ -1200,6 +1279,7 @@ function normalize(extraction, meta = {}, options = {}) {
       channel: meta.channel || null,
       chatTitle: meta.chatTitle || null,
       url: meta.url || null,
+      threadId,
       capturedAt: meta.capturedAt || null,
       capturedBy: meta.capturedBy || null,
       toolVersion: meta.toolVersion || TOOL_VERSION,
@@ -1212,6 +1292,7 @@ function normalize(extraction, meta = {}, options = {}) {
       rangeStart: stamps[0] || null,
       rangeEnd: stamps[stamps.length - 1] || null,
       systemExcluded: includeSystem ? 0 : systemMessages.length,
+      permalinkCount: withPermalink,
       truncated,
       replyGaps,
       warningCount: warnings.length,
@@ -1227,6 +1308,45 @@ function normalize(extraction, meta = {}, options = {}) {
 }
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * 個々のメッセージへのディープリンクを組み立てる（設定は selectors.json の permalink）。
+ *
+ * base のプレースホルダが 1 つでも埋まらなければ null を返す（推測で URL を作らない）。
+ * params は値のあるものだけを残す。パス部は Teams のリンクが生の '19:…@thread.tacv2' を
+ * そのまま使っているためエスケープせず、クエリ値だけを encodeURIComponent する。
+ *
+ * @param {object|null} config { base: string, params?: object }
+ * @param {object} values { threadId, messageId, parentId, tenantId }
+ * @returns {string|null}
+ */
+function buildPermalink(config, values = {}) {
+  if (!config || !config.base) return null;
+  const base = fillTemplate(config.base, values);
+  if (base == null) return null;
+
+  const query = Object.entries(config.params || {})
+    .map(([key, template]) => [key, fillTemplate(template, values)])
+    .filter(([, value]) => value != null && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+
+  return query.length > 0 ? `${base}?${query.join('&')}` : base;
+}
+
+/** '{a}/{b}' を values で埋める。埋まらないプレースホルダがあれば null。 */
+function fillTemplate(template, values) {
+  if (typeof template !== 'string') return null;
+  let missing = false;
+  const filled = template.replace(/\{(\w+)\}/g, (_, key) => {
+    const value = values[key];
+    if (value == null || value === '') {
+      missing = true;
+      return '';
+    }
+    return String(value);
+  });
+  return missing ? null : filled;
+}
 
 function stripInternal(message) {
   const copy = { ...message };
@@ -1936,6 +2056,7 @@ function renderFrontMatter(model, days, opts) {
     ['channel', s.channel],
     ['chat_title', s.chatTitle],
     ['url', s.url],
+    ['thread_id', s.threadId],
     ['captured_at', s.capturedAt],
     ['captured_by', s.capturedBy],
     ['message_count', messageCount],
@@ -1984,7 +2105,9 @@ function renderMessage(message, opts) {
   if (opts.isReply) marks.push('↳返信');
   if (message.edited) marks.push('(編集済み)');
 
-  lines.push(`${heading} ${time}  ${author}${marks.length > 0 ? ` ${marks.join(' ')}` : ''}`);
+  // 元のメッセージへのリンク。取れなかったメッセージには付かない（警告は末尾の一覧に出る）
+  const link = message.permalink ? ` [🔗](${message.permalink})` : '';
+  lines.push(`${heading} ${time}  ${author}${marks.length > 0 ? ` ${marks.join(' ')}` : ''}${link}`);
 
   if (message.subject) {
     lines.push('');
@@ -2223,6 +2346,9 @@ const SELECTORS = {
       "parentIdHost": "[data-reply-chain-id]",
       "parentIdAttr": "data-reply-chain-id",
 
+      "conversationIdHost": ["[data-tid='sendMessageCommands-send'][data-track-thread-id]", "[data-track-thread-id]"],
+      "conversationIdAttr": "data-track-thread-id",
+
       "idTemplates": {
         "author": "author-{mid}",
         "timestamp": "timestamp-{mid}",
@@ -2304,6 +2430,9 @@ const SELECTORS = {
       "parentIdHost": [],
       "parentIdAttr": "data-reply-chain-id",
 
+      "conversationIdHost": ["[data-tid='sendMessageCommands-send'][data-track-thread-id]", "[data-track-thread-id]"],
+      "conversationIdAttr": "data-track-thread-id",
+
       "idTemplates": {
         "author": "author-{mid}",
         "timestamp": "timestamp-{mid}",
@@ -2381,6 +2510,15 @@ const SELECTORS = {
     "skipImageUrl": "^blob:"
   },
 
+  "permalink": {
+    "note": "個々のメッセージへのディープリンク。base のプレースホルダが 1 つでも埋まらなければリンクを作らない（推測で URL を組み立てない）。params は値が無いものを落とす。tenantId は DOM から確実に取れないため既定では付けない（options.tenantId で明示指定できる）。",
+    "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
+    "params": {
+      "tenantId": "{tenantId}",
+      "parentMessageId": "{parentId}"
+    }
+  },
+
   "_meta": {
     "confirmed": {
       "conversationPane": "祖先要素の採取で確定。channel は [data-tid='channel-pane-viewport']、chat は [data-tid='message-pane-list-viewport'] が実際にスクロールする要素（4 回の channel 採取・1 回の chat 採取すべてで一致）。共通の外枠として [data-tid='message-pane-body'] が両方に存在するのでフォールバックに入れてある。",
@@ -2398,6 +2536,7 @@ const SELECTORS = {
       "urlPreview": "[data-tid='url-preview']。リンクのカード型プレビュー。本文のリンクと重複するため未対応要素として畳む。",
       "edited": "span[id='edited-{mid}'] に「編集済み」。**メッセージ本体（data-mid の箱）の外側・メッセージ単位の内側**にあり、採取スクリプトが本体だけを見ていたため当初 0 件と誤報告していた（実際は 22 件）。title 属性に「2026年8月4日 17:06 に編集しました」「今日の 14:00 に編集しました」「更新済み 今日の 9:49」の形で編集時刻が入るので、editedAt として ISO 化できる（22/22 で成功）。",
       "codeBlockLanguage": "コードブロックの言語名は <pre> ではなく直前の兄弟のヘッダ [data-tid='code-block-editor-deserialized-language']（表示は 'Plain Text' 等）にある。",
+      "conversationId": "いま開いている会話の ID（threadId）は data-track-thread-id にある。2026-08-13 に実機のコンソールで確認: チャネル（[data-tid='sendMessageCommands-send'] ほか会議ヘッダのボタン計 3 個、値はすべて同一の 19:…@thread.tacv2）、会議チャット（1 個・19:meeting_…@thread.v2）。**ページ全文を正規表現で探す方式は使えない**（左一覧の全会話 120 件近くが DOM に載っており、さらに会話ペイン内にも本文に貼られた他会話のリンク由来の ID が混ざる）。この属性を持つ要素だけを見ること。なお location.href は 'https://teams.microsoft.com/v2' 固定で会話を識別できない。1:1 チャット（@unq.gbl.spaces）は未確認。",
       "deepLink": "[data-tid='deeplink-attachment-grid'] はタブ等へのディープリンクで、ファイル添付（file-attachment-grid）とは別物。id が attachments-deeplink-{mid} なので、添付コンテナを id 接頭辞で引くと誤検出する（実際に attachment-unrecognized 警告が出た）。添付は file-attachment-grid に限定し、ディープリンクは deepLinks として別に拾う。"
     },
     "corrected": {
@@ -2437,13 +2576,21 @@ if (!pane) {
     },
   }));
 
+  // 会話 ID は入力欄の送信ボタンなど「ペインの外」にあるので、document.body から探す。
+  // 本文に貼られた他会話のリンクを拾わないよう、専用の属性を持つ要素だけを見ている。
+  const conversation = extractConversationId(document.body, SELECTORS, { profile });
+  conversation.warnings.forEach((w) => collected.warnings.push(w));
+
   const model = normalize(collected, {
     kind: profile,
     url: location.href,
+    threadId: conversation.threadId,
     capturedAt: toLocalIso(startedAt),
     toolVersion: '0.1.0',
   }, {
     patterns: SELECTORS.patterns,
+    permalink: SELECTORS.permalink,
+    tenantId: options.tenantId || null,
     truncated: collected.truncated,
   });
   model.stats.scroll = collected.stats;
@@ -2473,6 +2620,7 @@ function printSummary(model, files) {
     スレッド数: s.threadCount,
     期間: `${s.rangeStart || '?'} 〜 ${s.rangeEnd || '?'}`,
     truncated: s.truncated,
+    メッセージへのリンク: `${s.permalinkCount} / ${s.messageCount}`,
     停止理由: s.scroll.stopReason,
     スクロール周回: s.scroll.steps,
     展開した本文: s.scroll.expandedBodies,

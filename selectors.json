@@ -27,6 +27,9 @@
       "parentIdHost": "[data-reply-chain-id]",
       "parentIdAttr": "data-reply-chain-id",
 
+      "conversationIdHost": ["[data-tid='sendMessageCommands-send'][data-track-thread-id]", "[data-track-thread-id]"],
+      "conversationIdAttr": "data-track-thread-id",
+
       "idTemplates": {
         "author": "author-{mid}",
         "timestamp": "timestamp-{mid}",
@@ -108,6 +111,9 @@
       "parentIdHost": [],
       "parentIdAttr": "data-reply-chain-id",
 
+      "conversationIdHost": ["[data-tid='sendMessageCommands-send'][data-track-thread-id]", "[data-track-thread-id]"],
+      "conversationIdAttr": "data-track-thread-id",
+
       "idTemplates": {
         "author": "author-{mid}",
         "timestamp": "timestamp-{mid}",
@@ -185,6 +191,15 @@
     "skipImageUrl": "^blob:"
   },
 
+  "permalink": {
+    "note": "個々のメッセージへのディープリンク。base のプレースホルダが 1 つでも埋まらなければリンクを作らない（推測で URL を組み立てない）。params は値が無いものを落とす。tenantId は DOM から確実に取れないため既定では付けない（options.tenantId で明示指定できる）。",
+    "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
+    "params": {
+      "tenantId": "{tenantId}",
+      "parentMessageId": "{parentId}"
+    }
+  },
+
   "_meta": {
     "confirmed": {
       "conversationPane": "祖先要素の採取で確定。channel は [data-tid='channel-pane-viewport']、chat は [data-tid='message-pane-list-viewport'] が実際にスクロールする要素（4 回の channel 採取・1 回の chat 採取すべてで一致）。共通の外枠として [data-tid='message-pane-body'] が両方に存在するのでフォールバックに入れてある。",
@@ -202,6 +217,7 @@
       "urlPreview": "[data-tid='url-preview']。リンクのカード型プレビュー。本文のリンクと重複するため未対応要素として畳む。",
       "edited": "span[id='edited-{mid}'] に「編集済み」。**メッセージ本体（data-mid の箱）の外側・メッセージ単位の内側**にあり、採取スクリプトが本体だけを見ていたため当初 0 件と誤報告していた（実際は 22 件）。title 属性に「2026年8月4日 17:06 に編集しました」「今日の 14:00 に編集しました」「更新済み 今日の 9:49」の形で編集時刻が入るので、editedAt として ISO 化できる（22/22 で成功）。",
       "codeBlockLanguage": "コードブロックの言語名は <pre> ではなく直前の兄弟のヘッダ [data-tid='code-block-editor-deserialized-language']（表示は 'Plain Text' 等）にある。",
+      "conversationId": "いま開いている会話の ID（threadId）は data-track-thread-id にある。2026-08-13 に実機のコンソールで確認: チャネル（[data-tid='sendMessageCommands-send'] ほか会議ヘッダのボタン計 3 個、値はすべて同一の 19:…@thread.tacv2）、会議チャット（1 個・19:meeting_…@thread.v2）。**ページ全文を正規表現で探す方式は使えない**（左一覧の全会話 120 件近くが DOM に載っており、さらに会話ペイン内にも本文に貼られた他会話のリンク由来の ID が混ざる）。この属性を持つ要素だけを見ること。なお location.href は 'https://teams.microsoft.com/v2' 固定で会話を識別できない。1:1 チャット（@unq.gbl.spaces）は未確認。",
       "deepLink": "[data-tid='deeplink-attachment-grid'] はタブ等へのディープリンクで、ファイル添付（file-attachment-grid）とは別物。id が attachments-deeplink-{mid} なので、添付コンテナを id 接頭辞で引くと誤検出する（実際に attachment-unrecognized 警告が出た）。添付は file-attachment-grid に限定し、ディープリンクは deepLinks として別に拾う。"
     },
     "corrected": {

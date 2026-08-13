@@ -26,6 +26,13 @@ window.TEAMS_COLLECT = { maxSteps: 400, maxDurationMs: 600000 };
 window.TEAMS_COLLECT = { expandReplies: true };
 ```
 
+各メッセージの見出しには、Teams の該当メッセージを開くリンク `[🔗](…)` が付く。
+複数テナントに所属していてリンクが開かない場合は、テナント ID を明示する:
+
+```js
+window.TEAMS_COLLECT = { tenantId: '（自組織のテナント ID）' };
+```
+
 保存せず結果だけ見たいとき / 中間データ（JSON）も保存したいとき:
 
 ```js
@@ -43,6 +50,8 @@ window.TEAMS_SAVE_JSON = true;  // 中間モデルの JSON も保存する
 | 期間（最古〜最新） | 実際に遡れた範囲と一致 | 日時解釈の問題 |
 | 停止理由 | 先頭まで行けたなら `reached-top` | `max-steps` / `max-duration` なら上限を上げる |
 | truncated | 先頭まで行けたなら false | true なら理由が警告に出ている |
+| メッセージへのリンク | `15 / 15` のように全件に付く | `0 / N` なら会話 ID が取れていない（`conversation-id-not-found`）|
+| 🔗 を実際に開く | 該当メッセージが Teams で開く | 開かなければ `tenantId` の指定を試す |
 | 警告の内訳 | `collapsed-body` や `replies-not-expanded` は仕様どおりの報告 | 見慣れないコードが出たら教えてほしい |
 | 最古・最新のプレビュー | 実際の投稿と一致 | 本文の変換に問題 |
 | 保存された .md | 日付見出し・返信のぶら下げ・添付・リアクションが読める形 | レンダラの問題 |

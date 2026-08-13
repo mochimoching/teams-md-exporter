@@ -1,16 +1,17 @@
 /**
  * 抽出パイプラインのエントリポイント。
- * スクロールドライバ（未実装）→ ここ → Markdown レンダラ（未実装）とつながる。
+ * スクロールドライバ → 抽出コア → 正規化 → Markdown レンダラ をつなぐ。
  */
 
-import { extractConversation, extractMessage } from './extract.js';
-import { normalize, toIsoTimestamp, parseReaction } from './normalize.js';
+import { extractConversation, extractConversationId, extractMessage } from './extract.js';
+import { buildPermalink, normalize, toIsoTimestamp, parseReaction } from './normalize.js';
 import { htmlToMarkdown } from './html-to-markdown.js';
 import { collectByScrolling, findConversationPane } from './scroll-driver.js';
 import { buildFilename, renderMarkdown, renderMarkdownFiles } from './markdown-renderer.js';
 
 export {
-  extractConversation, extractMessage, normalize, toIsoTimestamp, parseReaction, htmlToMarkdown,
+  extractConversation, extractConversationId, extractMessage,
+  normalize, toIsoTimestamp, parseReaction, buildPermalink, htmlToMarkdown,
   collectByScrolling, findConversationPane,
   renderMarkdown, renderMarkdownFiles, buildFilename,
 };
@@ -25,7 +26,21 @@ export {
  */
 export function extractToModel(rootEl, selectors, meta = {}, options = {}) {
   const extraction = extractConversation(rootEl, selectors, options);
-  return normalize(extraction, meta, { ...options, patterns: selectors.patterns });
+  return normalize(extraction, meta, { ...options, patterns: selectors.patterns, permalink: selectors.permalink });
+}
+
+/**
+ * 会話 ID（threadId）を解決して meta に載せる。
+ * 会話 ID は入力欄の送信ボタンなど会話ペインの外にあるため、
+ * ペインより広い検索ルート（options.searchRoot、ブラウザでは document.body）が要る。
+ * meta.threadId が既に入っていれば何もしない（呼び出し側の指定を優先）。
+ */
+function resolveThreadId(rootEl, selectors, meta, options, warnings) {
+  if (meta.threadId) return meta;
+  const searchRoot = options.searchRoot || rootEl;
+  const found = extractConversationId(searchRoot, selectors, options);
+  for (const w of found.warnings) warnings.push(w);
+  return { ...meta, threadId: found.threadId };
 }
 
 /**
@@ -39,9 +54,11 @@ export async function collectToModel(rootEl, selectors, meta = {}, options = {})
   const profile = options.profile || 'channel';
   const pane = findConversationPane(rootEl, selectors, profile) || rootEl;
   const collected = await collectByScrolling(pane, selectors, { ...options, profile });
-  const model = normalize(collected, meta, {
+  const metaWithThread = resolveThreadId(rootEl, selectors, meta, { ...options, profile }, collected.warnings);
+  const model = normalize(collected, metaWithThread, {
     ...options,
     patterns: selectors.patterns,
+    permalink: selectors.permalink,
     truncated: collected.truncated,
   });
   model.stats.scroll = collected.stats;

@@ -11,14 +11,16 @@ const TOOL_VERSION = '0.1.0';
 
 /**
  * @param {object} extraction extractConversation() の戻り値
- * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy }
- * @param {object} options { patterns, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
+ * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy, threadId }
+ * @param {object} options { patterns, permalink?, tenantId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
  * @returns {{source: object, participants: Array, messages: Array, stats: object, warnings: Array}}
  */
 export function normalize(extraction, meta = {}, options = {}) {
   const patterns = compilePatterns(options.patterns || {});
   const offset = options.timezoneOffset || '+09:00';
   const warnings = [...(extraction.warnings || [])];
+  const permalinkConfig = options.permalink || null;
+  const threadId = meta.threadId || null;
 
   const seen = new Map();
   const messages = [];
@@ -75,6 +77,13 @@ export function normalize(extraction, meta = {}, options = {}) {
     messages.push({
       id: raw.id,
       parentId: raw.parentId ?? null,
+      permalink: buildPermalink(permalinkConfig, {
+        threadId,
+        messageId: raw.id,
+        // Teams のディープリンクは投稿本体でも parentMessageId を要求する（親は自分自身）
+        parentId: raw.parentId ?? raw.id,
+        tenantId: options.tenantId || null,
+      }),
       author: raw.author || null,
       authorInherited: Boolean(raw.authorInherited),
       timestamp: ts.iso,
@@ -109,6 +118,18 @@ export function normalize(extraction, meta = {}, options = {}) {
   }
   kept.sort(byTimestampThenDomOrder);
 
+  // リンクを付けられなかったことは黙って隠さない（原則4）。会話 ID が取れなかったのが唯一の原因。
+  const withPermalink = kept.filter((m) => m.permalink).length;
+  if (permalinkConfig && kept.length > 0 && withPermalink === 0) {
+    warnings.push({
+      level: 'warn',
+      code: 'permalink-unavailable',
+      detail: threadId
+        ? 'メッセージ ID が取れないため、個々のメッセージへのリンクを作れませんでした'
+        : '会話 ID（threadId）が取れないため、個々のメッセージへのリンクを作れませんでした',
+    });
+  }
+
   const boxes = extraction.boxes || [];
   const replyGaps = [];
   for (const box of boxes) {
@@ -138,6 +159,7 @@ export function normalize(extraction, meta = {}, options = {}) {
       channel: meta.channel || null,
       chatTitle: meta.chatTitle || null,
       url: meta.url || null,
+      threadId,
       capturedAt: meta.capturedAt || null,
       capturedBy: meta.capturedBy || null,
       toolVersion: meta.toolVersion || TOOL_VERSION,
@@ -150,6 +172,7 @@ export function normalize(extraction, meta = {}, options = {}) {
       rangeStart: stamps[0] || null,
       rangeEnd: stamps[stamps.length - 1] || null,
       systemExcluded: includeSystem ? 0 : systemMessages.length,
+      permalinkCount: withPermalink,
       truncated,
       replyGaps,
       warningCount: warnings.length,
@@ -165,6 +188,45 @@ export function normalize(extraction, meta = {}, options = {}) {
 }
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * 個々のメッセージへのディープリンクを組み立てる（設定は selectors.json の permalink）。
+ *
+ * base のプレースホルダが 1 つでも埋まらなければ null を返す（推測で URL を作らない）。
+ * params は値のあるものだけを残す。パス部は Teams のリンクが生の '19:…@thread.tacv2' を
+ * そのまま使っているためエスケープせず、クエリ値だけを encodeURIComponent する。
+ *
+ * @param {object|null} config { base: string, params?: object }
+ * @param {object} values { threadId, messageId, parentId, tenantId }
+ * @returns {string|null}
+ */
+export function buildPermalink(config, values = {}) {
+  if (!config || !config.base) return null;
+  const base = fillTemplate(config.base, values);
+  if (base == null) return null;
+
+  const query = Object.entries(config.params || {})
+    .map(([key, template]) => [key, fillTemplate(template, values)])
+    .filter(([, value]) => value != null && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+
+  return query.length > 0 ? `${base}?${query.join('&')}` : base;
+}
+
+/** '{a}/{b}' を values で埋める。埋まらないプレースホルダがあれば null。 */
+function fillTemplate(template, values) {
+  if (typeof template !== 'string') return null;
+  let missing = false;
+  const filled = template.replace(/\{(\w+)\}/g, (_, key) => {
+    const value = values[key];
+    if (value == null || value === '') {
+      missing = true;
+      return '';
+    }
+    return String(value);
+  });
+  return missing ? null : filled;
+}
 
 function stripInternal(message) {
   const copy = { ...message };

@@ -65,13 +65,21 @@ if (!pane) {
     },
   }));
 
+  // 会話 ID は入力欄の送信ボタンなど「ペインの外」にあるので、document.body から探す。
+  // 本文に貼られた他会話のリンクを拾わないよう、専用の属性を持つ要素だけを見ている。
+  const conversation = extractConversationId(document.body, SELECTORS, { profile });
+  conversation.warnings.forEach((w) => collected.warnings.push(w));
+
   const model = normalize(collected, {
     kind: profile,
     url: location.href,
+    threadId: conversation.threadId,
     capturedAt: toLocalIso(startedAt),
     toolVersion: '${version}',
   }, {
     patterns: SELECTORS.patterns,
+    permalink: SELECTORS.permalink,
+    tenantId: options.tenantId || null,
     truncated: collected.truncated,
   });
   model.stats.scroll = collected.stats;
@@ -101,6 +109,7 @@ function printSummary(model, files) {
     スレッド数: s.threadCount,
     期間: \`\${s.rangeStart || '?'} 〜 \${s.rangeEnd || '?'}\`,
     truncated: s.truncated,
+    メッセージへのリンク: \`\${s.permalinkCount} / \${s.messageCount}\`,
     停止理由: s.scroll.stopReason,
     スクロール周回: s.scroll.steps,
     展開した本文: s.scroll.expandedBodies,
@@ -179,6 +188,8 @@ const banner = `/**
  *   window.TEAMS_COLLECT = { expandReplies: true };
  * 保存せず結果だけ見たいとき:
  *   window.TEAMS_SAVE_MD = false;
+ * 各メッセージへのリンクにテナント ID を付けるとき（複数テナントに所属している場合に有効）:
+ *   window.TEAMS_COLLECT = { tenantId: '（自組織のテナント ID）' };
  *
  * 行うのは会話ペインのスクロールと「詳細を表示」の展開だけです。
  * 認証情報には触れず、ネットワークへ送信もしません（CLAUDE.md 原則1・2）。

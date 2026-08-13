@@ -119,6 +119,7 @@ function renderFrontMatter(model, days, opts) {
     ['channel', s.channel],
     ['chat_title', s.chatTitle],
     ['url', s.url],
+    ['thread_id', s.threadId],
     ['captured_at', s.capturedAt],
     ['captured_by', s.capturedBy],
     ['message_count', messageCount],
@@ -167,7 +168,9 @@ function renderMessage(message, opts) {
   if (opts.isReply) marks.push('↳返信');
   if (message.edited) marks.push('(編集済み)');
 
-  lines.push(`${heading} ${time}  ${author}${marks.length > 0 ? ` ${marks.join(' ')}` : ''}`);
+  // 元のメッセージへのリンク。取れなかったメッセージには付かない（警告は末尾の一覧に出る）
+  const link = message.permalink ? ` [🔗](${message.permalink})` : '';
+  lines.push(`${heading} ${time}  ${author}${marks.length > 0 ? ` ${marks.join(' ')}` : ''}${link}`);
 
   if (message.subject) {
     lines.push('');

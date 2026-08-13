@@ -155,7 +155,7 @@ tools/check-samples.js        全サンプルでの命中率レポート
 - セレクタは **コード内に一切書かない**（`tests/selectors-policy.test.js` が `src/` を機械検査）。
 - 取りこぼし・欠落は必ず `warnings[]` に積む（`fatal` / `warn` / `info`）。抽出 0 件は fatal。
 
-### テスト（`npm test`: 42 件）
+### テスト（`npm test`: 77 件）
 
 採取した実 DOM をそのまま読み込んで検証しています（テスト用に HTML を書き換えていない）。
 件数の固定値はサンプルを採り直すと変わるため、原則は「全件で取れていること」を検査しています。
@@ -176,3 +176,57 @@ tools/check-samples.js        全サンプルでの命中率レポート
 
 ユーザースクリプト（Tampermonkey）や拡張機能としてのパッケージ化と、設定 UI（§7-2 の取得範囲の選択）。
 現状はコンソールに貼る運用（`docs/try-it.md`）。
+
+---
+
+## 6. メッセージへのリンク（2026-08-13 追加）
+
+出力 Markdown の各メッセージ見出しに、Teams の該当メッセージを開くリンク `[🔗](…)` を付けられるようにした。
+DOM サンプルには材料が無かったため、実機のコンソールで調査した結果を以下に残す。
+
+### 6.1 会話 ID（threadId）の在りか
+
+`data-track-thread-id`。**送信ボタン `[data-tid='sendMessageCommands-send']` が持っている。**
+
+| 会話 | この属性を持つ要素数 | 値 |
+|---|---|---|
+| チャネル | 3（送信ボタン＋会議ヘッダの 2 ボタン） | すべて同一の `19:…@thread.tacv2` |
+| 会議チャット | 1 | `19:meeting_…@thread.v2` |
+
+要素数はチャネルによって 2〜3 と変わるが、**値は同一**であることを確認済み。1:1 チャット（`@unq.gbl.spaces`）は未確認。
+
+### 6.2 使えなかった経路（同じ調査を繰り返さないための記録）
+
+| 経路 | 結果 |
+|---|---|
+| `location.href` | `https://teams.microsoft.com/v2` 固定。会話を識別できない |
+| ページ全文の正規表現検索 | **不可**。左一覧に載っている全会話の ID が約 120 件ヒットする（1:1・グループ・会議・チャネルが混在） |
+| 会話ペイン内の正規表現検索 | **不可**。本文に貼られた他会話へのリンクやチップ由来の ID が混ざる（チャットのペインから `@thread.tacv2` が 3 種類出た） |
+| 要素の `id` 属性（`[id^="19:"]`） | 0 件 |
+| 左一覧の選択状態（`[aria-selected=true]`） | アプリのタブ（`com.microsoft.chattabs.chat`）しか返らない |
+| `localStorage` / IndexedDB | **調べない**（CLAUDE.md 原則 1・方式C禁止） |
+
+結論として、**この属性を持つ要素を指名して読む以外に安全な方法は無い**。
+`src/extract.js` の `extractConversationId()` はそのためのもので、検索ルートを引数で受け取る純粋関数のまま
+（送信ボタンは会話ペインの外にあるため、呼び出し側が `document.body` 相当を渡す）。
+
+### 6.3 URL の形
+
+```
+https://teams.microsoft.com/l/message/{threadId}/{messageId}?parentMessageId={parentId}
+```
+
+- `messageId` は既存の `data-mid`、`parentId` は返信なら親投稿の ID、投稿本体なら自分自身。
+- 書式は採取済みサンプルの中に実物の Teams リンクが含まれていたことで確認した。
+- パス部の `19:…@thread.tacv2` はエスケープしない（実物のリンクが生のまま）。クエリ値だけ URL エンコードする。
+- `tenantId` は DOM から確実に取れる場所が無いため**既定では付けない**。複数テナントに所属していて
+  リンクが開かない場合は `window.TEAMS_COLLECT = { tenantId: '…' }` で明示する。
+- テンプレートは `selectors.json` の `permalink`。プレースホルダが 1 つでも埋まらなければ URL を作らない（推測しない）。
+
+### 6.4 取れなかったときの扱い
+
+会話 ID が取れなければリンクは付けず、`conversation-id-not-found` / `permalink-unavailable` を警告に出す（原則 4）。
+候補の値が食い違った場合は `conversation-id-ambiguous` を出したうえで先頭を採用する。
+`stats.permalinkCount` に「何件にリンクを付けられたか」が入る。
+
+生成したリンクは**その会話にアクセス権のある人しか開けない**。リンク自体は権限を回避しない。
