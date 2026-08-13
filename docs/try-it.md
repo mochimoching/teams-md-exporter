@@ -1,5 +1,8 @@
 # 実機で使う（コンソールに貼る）
 
+> 常用するなら **ユーザースクリプト版**（`docs/userscript.md`）のほうが手数が少ない。
+> こちらは拡張を入れずに一度だけ試したいとき、UI を挟まず結果を確かめたいときのもの。
+
 `dist/teams-collect-console.js` をブラウザのコンソールに貼ると、会話を遡って収集し、
 **Markdown ファイルを保存する**。中間データは `window.TEAMS_RESULT`、Markdown は `window.TEAMS_FILES` に残る。
 

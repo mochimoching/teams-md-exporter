@@ -6,7 +6,9 @@
   "private": true,
   "scripts": {
     "test": "node --test tests/",
-    "build": "node tools/build-console-script.js",
+    "build": "npm run build:userscript && npm run build:console",
+    "build:userscript": "node tools/build-userscript.js",
+    "build:console": "node tools/build-console-script.js",
     "check-samples": "node tools/check-samples.js"
   },
   "devDependencies": {

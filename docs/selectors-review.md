@@ -145,17 +145,24 @@ src/normalize.js        生メッセージ → 中間データモデル（仕様
 src/index.js            extractToModel(rootEl, selectors, meta, options)
 src/scroll-driver.js    スクロールドライバ（仮想スクロール制御・重複排除・truncated 判定）→ docs/scroll-driver.md
 src/markdown-renderer.js  Markdown レンダラ（フロントマター・日付見出し・返信のぶら下げ・分割、§6）
-tools/build-console-script.js  コンソール貼り付け用の 1 ファイルを生成 → docs/try-it.md
+tools/bundle.js               src/ をブラウザ用に連結する共通処理（バンドラは入れない）
+tools/browser-runtime.js      ブラウザ側の共通グルー。document/window に触れるのはここだけ
+tools/build-userscript.js     ユーザースクリプトを生成 → docs/userscript.md
+tools/userscript-ui.js        ユーザースクリプトの UI（右下のボタン）
+tools/build-console-script.js コンソール貼り付け用の 1 ファイルを生成 → docs/try-it.md
 tools/collect-dom-samples.js  DOM サンプル採取（ブラウザのコンソールに貼る）
 tools/check-samples.js        全サンプルでの命中率レポート
 ```
+
+フロントエンドは 2 つ（ユーザースクリプト / コンソール貼り付け）あるが、収集・変換・出力は
+`tools/browser-runtime.js` の `runExport()` を共有している。入口の違いだけで挙動は同じ。
 
 - 抽出コア（extract / normalize / html-to-markdown）は **DOM ルート要素を引数で受け取る純粋関数**。
   副作用（スクロール・展開クリック・待機）は scroll-driver.js だけに閉じてある。`document` / `window` / 現在時刻に触れないので、方式A（ブラウザ内）でも方式B（Playwright / jsdom）でも同じものを呼べる。
 - セレクタは **コード内に一切書かない**（`tests/selectors-policy.test.js` が `src/` を機械検査）。
 - 取りこぼし・欠落は必ず `warnings[]` に積む（`fatal` / `warn` / `info`）。抽出 0 件は fatal。
 
-### テスト（`npm test`: 88 件）
+### テスト（`npm test`: 96 件）
 
 採取した実 DOM をそのまま読み込んで検証しています（テスト用に HTML を書き換えていない）。
 件数の固定値はサンプルを採り直すと変わるため、原則は「全件で取れていること」を検査しています。
@@ -177,8 +184,8 @@ tools/check-samples.js        全サンプルでの命中率レポート
 | 項目 | 状態 |
 |---|---|
 | 返信スレッドの回収（`expandReplies: true`）の実機検証 | **保留**（2026-08-13・利用者判断）。既定 false で運用する。再開時の確認手順は `docs/scroll-driver.md` の「課題: 返信スレッドの回収は未検証」に記載 |
-| ユーザースクリプト（Tampermonkey）／拡張機能としてのパッケージ化 | 未着手。現状はコンソールに貼る運用（`docs/try-it.md`） |
-| 設定 UI（§7-2 の取得範囲の選択） | 未着手 |
+| ユーザースクリプト（Tampermonkey）としてのパッケージ化 | **実装済み**（`dist/teams-md-exporter.user.js` / `docs/userscript.md`）。実機での確認は未実施 |
+| 設定 UI（§7-2 の取得範囲の選択） | 未着手。当面は `window.TEAMS_COLLECT` で上書きする |
 
 ---
 

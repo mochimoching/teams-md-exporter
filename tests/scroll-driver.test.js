@@ -285,3 +285,20 @@ test('抽出 0 件は fatal 警告になる', async () => {
   assert.equal(result.messages.length, 0);
   assert.ok(result.warnings.some((w) => w.level === 'fatal' && w.code === 'no-messages-extracted'));
 });
+
+test('shouldAbort が true を返すと打ち切り、truncated として報告する', async () => {
+  const pages = [blocks.slice(0, 3), blocks.slice(3, 6), blocks.slice(6, 9)].map((b) => b.join('\n'));
+  const { pane } = makeVirtualPane(pages);
+
+  let rounds = 0;
+  const result = await collectByScrolling(pane, selectors, {
+    ...noWait,
+    profile: 'channel',
+    shouldAbort: () => (rounds += 1) > 1, // 2 周目で中止
+  });
+
+  assert.equal(result.stats.stopReason, 'aborted');
+  assert.equal(result.truncated, true);
+  assert.ok(result.messages.length > 0, '中止でも、それまでに取れた分は返す');
+  assert.ok(result.warnings.some((w) => w.code === 'scroll-truncated'), '取りこぼしが警告に出ていない');
+});

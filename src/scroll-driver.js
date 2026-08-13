@@ -46,6 +46,11 @@ const DEFAULTS = {
   /** スレッドペインが開く/閉じるのを待つ上限 */
   threadWaitMs: 8000,
   onProgress: null,
+  /**
+   * true を返すと収集を打ち切る（UI の「中止」ボタン用）。
+   * 打ち切った場合も stopReason: 'aborted' / truncated: true として必ず報告する。
+   */
+  shouldAbort: null,
 };
 
 /**
@@ -372,6 +377,7 @@ function contentSize(message) {
 
 /** 停止条件。到達した場合は理由の文字列を返す */
 function shouldStop(stats, acc, opts, elapsedMs) {
+  if (typeof opts.shouldAbort === 'function' && opts.shouldAbort()) return 'aborted';
   if (acc.size >= opts.maxMessages) return 'max-messages';
   if (stats.steps >= opts.maxSteps) return 'max-steps';
   if (elapsedMs >= opts.maxDurationMs) return 'max-duration';
