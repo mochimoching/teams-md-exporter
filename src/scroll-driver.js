@@ -15,6 +15,7 @@
  */
 
 import { extractConversation } from './extract.js';
+import { toIsoTimestamp } from './normalize.js';
 import { compilePatterns, findById, isUnset, queryAll, queryFirst, toSelectorList } from './selector-utils.js';
 
 const DEFAULTS = {
@@ -32,8 +33,13 @@ const DEFAULTS = {
   maxSteps: 400,
   maxDurationMs: 10 * 60 * 1000,
   maxMessages: Infinity,
-  /** この日時より古いメッセージまで遡ったら停止（ISO 文字列）。到達したら truncated = false */
+  /**
+   * この日時より古いメッセージまで遡ったら停止（ISO 文字列）。到達したら truncated = false。
+   * 相対表記（「昨日の 19:18」）を解決するために capturedAt（取得時刻の ISO）も渡すこと。
+   */
   stopBefore: null,
+  capturedAt: null,
+  timezoneOffset: '+09:00',
   /** 折りたたまれた本文（「詳細を表示」）をクリックして展開する */
   expandBody: true,
   /**
@@ -63,6 +69,8 @@ const DEFAULTS = {
  */
 export async function collectByScrolling(paneOrGetter, selectors, options = {}) {
   const opts = { ...DEFAULTS, ...options };
+  // stopBefore の判定で日時を解釈するために要る（抽出側は自前でコンパイルするので影響しない）
+  opts.patterns = compilePatterns(selectors.patterns || {});
   let pane = paneOrGetter;
   const sleep = opts.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const now = opts.now || (() => Date.now());
@@ -382,18 +390,28 @@ function shouldStop(stats, acc, opts, elapsedMs) {
   if (stats.steps >= opts.maxSteps) return 'max-steps';
   if (elapsedMs >= opts.maxDurationMs) return 'max-duration';
   if (opts.stopBefore) {
-    const oldest = oldestTimestamp(acc);
-    if (oldest && oldest < opts.stopBefore) return 'stop-before-reached';
+    const limit = Date.parse(opts.stopBefore);
+    const oldest = oldestTimestamp(acc, opts);
+    if (oldest !== null && !Number.isNaN(limit) && oldest < limit) return 'stop-before-reached';
   }
   return null;
 }
 
-/** 蓄積済みメッセージのうち最も古い日時（ISO 文字列比較。取れないものは無視） */
-function oldestTimestamp(acc) {
+/**
+ * 蓄積済みメッセージのうち最も古い日時（エポックミリ秒）。取れないものは無視する。
+ *
+ * datetime 属性だけを見ていた頃は **チャネルで常に null になり、stopBefore が無反応**だった
+ * （datetime を持つのはチャットの <time> だけ）。正規化と同じ解釈器を通し、
+ * タイムゾーンの違う文字列を混ぜても壊れないよう数値で比較する。
+ */
+function oldestTimestamp(acc, opts) {
+  const options = { offset: opts.timezoneOffset, capturedAt: opts.capturedAt };
   let oldest = null;
   for (const m of acc.values()) {
-    const iso = m.timestamp && m.timestamp.attributes ? m.timestamp.attributes.datetime : null;
-    if (iso && (!oldest || iso < oldest)) oldest = iso;
+    const { iso } = toIsoTimestamp(m.timestamp, opts.patterns || {}, options);
+    if (!iso) continue;
+    const at = Date.parse(iso);
+    if (!Number.isNaN(at) && (oldest === null || at < oldest)) oldest = at;
   }
   return oldest;
 }

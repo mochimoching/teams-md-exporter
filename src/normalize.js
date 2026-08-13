@@ -12,7 +12,8 @@ const TOOL_VERSION = '0.1.0';
 /**
  * @param {object} extraction extractConversation() の戻り値
  * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy, threadId }
- * @param {object} options { patterns, permalink?, tenantId?, groupId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
+ * @param {object} options { patterns, permalink?, tenantId?, groupId?, timezoneOffset?, assumeYear?,
+ *   includeSystem?, since?（この日時より前は出力しない）, truncated? }
  * @returns {{source: object, participants: Array, messages: Array, stats: object, warnings: Array}}
  */
 export function normalize(extraction, meta = {}, options = {}) {
@@ -109,7 +110,7 @@ export function normalize(extraction, meta = {}, options = {}) {
   // ただし「何件落としたか」は必ず残す（黙って消さない）。
   const includeSystem = options.includeSystem === true;
   const systemMessages = messages.filter((m) => m.system);
-  const kept = includeSystem ? messages : messages.filter((m) => !m.system);
+  let kept = includeSystem ? messages : messages.filter((m) => !m.system);
   if (!includeSystem && systemMessages.length > 0) {
     warnings.push({
       level: 'info',
@@ -117,6 +118,36 @@ export function normalize(extraction, meta = {}, options = {}) {
       detail: `システムメッセージ ${systemMessages.length} 件を出力から除外しました（options.includeSystem: true で含められます）`,
     });
   }
+  // 取得範囲（options.since より前は出力しない）。スクロールは境界を少し越えて止まるため、
+  // 指定範囲を厳密にするにはここで落とす必要がある。落とした件数は必ず残す（黙って消さない）。
+  const rangeExcluded = [];
+  if (options.since) {
+    const limit = Date.parse(options.since);
+    if (Number.isNaN(limit)) {
+      warnings.push({
+        level: 'warn',
+        code: 'since-unparsed',
+        detail: `取得範囲の開始日時「${options.since}」を解釈できませんでした（範囲を絞らずに出力します）`,
+      });
+    } else {
+      kept = kept.filter((m) => {
+        // 日時が取れなかったメッセージは判定できないので落とさない（取りこぼしを作らない）
+        if (!m.timestamp) return true;
+        const at = Date.parse(m.timestamp);
+        if (Number.isNaN(at) || at >= limit) return true;
+        rangeExcluded.push(m);
+        return false;
+      });
+      if (rangeExcluded.length > 0) {
+        warnings.push({
+          level: 'info',
+          code: 'out-of-range-excluded',
+          detail: `取得範囲（${options.since} 以降）より古いメッセージ ${rangeExcluded.length} 件を出力から除外しました`,
+        });
+      }
+    }
+  }
+
   kept.sort(byTimestampThenDomOrder);
 
   // リンクを付けられなかったことは黙って隠さない（原則4）。会話 ID が取れなかったのが唯一の原因。
@@ -173,6 +204,8 @@ export function normalize(extraction, meta = {}, options = {}) {
       rangeStart: stamps[0] || null,
       rangeEnd: stamps[stamps.length - 1] || null,
       systemExcluded: includeSystem ? 0 : systemMessages.length,
+      rangeExcluded: rangeExcluded.length,
+      since: options.since || null,
       permalinkCount: withPermalink,
       truncated,
       replyGaps,

@@ -1134,7 +1134,8 @@ const TOOL_VERSION = '0.1.0';
 /**
  * @param {object} extraction extractConversation() の戻り値
  * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy, threadId }
- * @param {object} options { patterns, permalink?, tenantId?, groupId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
+ * @param {object} options { patterns, permalink?, tenantId?, groupId?, timezoneOffset?, assumeYear?,
+ *   includeSystem?, since?（この日時より前は出力しない）, truncated? }
  * @returns {{source: object, participants: Array, messages: Array, stats: object, warnings: Array}}
  */
 function normalize(extraction, meta = {}, options = {}) {
@@ -1231,7 +1232,7 @@ function normalize(extraction, meta = {}, options = {}) {
   // ただし「何件落としたか」は必ず残す（黙って消さない）。
   const includeSystem = options.includeSystem === true;
   const systemMessages = messages.filter((m) => m.system);
-  const kept = includeSystem ? messages : messages.filter((m) => !m.system);
+  let kept = includeSystem ? messages : messages.filter((m) => !m.system);
   if (!includeSystem && systemMessages.length > 0) {
     warnings.push({
       level: 'info',
@@ -1239,6 +1240,36 @@ function normalize(extraction, meta = {}, options = {}) {
       detail: `システムメッセージ ${systemMessages.length} 件を出力から除外しました（options.includeSystem: true で含められます）`,
     });
   }
+  // 取得範囲（options.since より前は出力しない）。スクロールは境界を少し越えて止まるため、
+  // 指定範囲を厳密にするにはここで落とす必要がある。落とした件数は必ず残す（黙って消さない）。
+  const rangeExcluded = [];
+  if (options.since) {
+    const limit = Date.parse(options.since);
+    if (Number.isNaN(limit)) {
+      warnings.push({
+        level: 'warn',
+        code: 'since-unparsed',
+        detail: `取得範囲の開始日時「${options.since}」を解釈できませんでした（範囲を絞らずに出力します）`,
+      });
+    } else {
+      kept = kept.filter((m) => {
+        // 日時が取れなかったメッセージは判定できないので落とさない（取りこぼしを作らない）
+        if (!m.timestamp) return true;
+        const at = Date.parse(m.timestamp);
+        if (Number.isNaN(at) || at >= limit) return true;
+        rangeExcluded.push(m);
+        return false;
+      });
+      if (rangeExcluded.length > 0) {
+        warnings.push({
+          level: 'info',
+          code: 'out-of-range-excluded',
+          detail: `取得範囲（${options.since} 以降）より古いメッセージ ${rangeExcluded.length} 件を出力から除外しました`,
+        });
+      }
+    }
+  }
+
   kept.sort(byTimestampThenDomOrder);
 
   // リンクを付けられなかったことは黙って隠さない（原則4）。会話 ID が取れなかったのが唯一の原因。
@@ -1295,6 +1326,8 @@ function normalize(extraction, meta = {}, options = {}) {
       rangeStart: stamps[0] || null,
       rangeEnd: stamps[stamps.length - 1] || null,
       systemExcluded: includeSystem ? 0 : systemMessages.length,
+      rangeExcluded: rangeExcluded.length,
+      since: options.since || null,
       permalinkCount: withPermalink,
       truncated,
       replyGaps,
@@ -1620,6 +1653,7 @@ function pad(value, width = 2) {
 
 
 
+
 const DEFAULTS = {
   profile: 'channel',
   /** 1 回のスクロール量（ペインの表示高さに対する割合）。小刻みにして飛ばさない */
@@ -1635,8 +1669,13 @@ const DEFAULTS = {
   maxSteps: 400,
   maxDurationMs: 10 * 60 * 1000,
   maxMessages: Infinity,
-  /** この日時より古いメッセージまで遡ったら停止（ISO 文字列）。到達したら truncated = false */
+  /**
+   * この日時より古いメッセージまで遡ったら停止（ISO 文字列）。到達したら truncated = false。
+   * 相対表記（「昨日の 19:18」）を解決するために capturedAt（取得時刻の ISO）も渡すこと。
+   */
   stopBefore: null,
+  capturedAt: null,
+  timezoneOffset: '+09:00',
   /** 折りたたまれた本文（「詳細を表示」）をクリックして展開する */
   expandBody: true,
   /**
@@ -1666,6 +1705,8 @@ const DEFAULTS = {
  */
 async function collectByScrolling(paneOrGetter, selectors, options = {}) {
   const opts = { ...DEFAULTS, ...options };
+  // stopBefore の判定で日時を解釈するために要る（抽出側は自前でコンパイルするので影響しない）
+  opts.patterns = compilePatterns(selectors.patterns || {});
   let pane = paneOrGetter;
   const sleep = opts.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const now = opts.now || (() => Date.now());
@@ -1985,18 +2026,28 @@ function shouldStop(stats, acc, opts, elapsedMs) {
   if (stats.steps >= opts.maxSteps) return 'max-steps';
   if (elapsedMs >= opts.maxDurationMs) return 'max-duration';
   if (opts.stopBefore) {
-    const oldest = oldestTimestamp(acc);
-    if (oldest && oldest < opts.stopBefore) return 'stop-before-reached';
+    const limit = Date.parse(opts.stopBefore);
+    const oldest = oldestTimestamp(acc, opts);
+    if (oldest !== null && !Number.isNaN(limit) && oldest < limit) return 'stop-before-reached';
   }
   return null;
 }
 
-/** 蓄積済みメッセージのうち最も古い日時（ISO 文字列比較。取れないものは無視） */
-function oldestTimestamp(acc) {
+/**
+ * 蓄積済みメッセージのうち最も古い日時（エポックミリ秒）。取れないものは無視する。
+ *
+ * datetime 属性だけを見ていた頃は **チャネルで常に null になり、stopBefore が無反応**だった
+ * （datetime を持つのはチャットの <time> だけ）。正規化と同じ解釈器を通し、
+ * タイムゾーンの違う文字列を混ぜても壊れないよう数値で比較する。
+ */
+function oldestTimestamp(acc, opts) {
+  const options = { offset: opts.timezoneOffset, capturedAt: opts.capturedAt };
   let oldest = null;
   for (const m of acc.values()) {
-    const iso = m.timestamp && m.timestamp.attributes ? m.timestamp.attributes.datetime : null;
-    if (iso && (!oldest || iso < oldest)) oldest = iso;
+    const { iso } = toIsoTimestamp(m.timestamp, opts.patterns || {}, options);
+    if (!iso) continue;
+    const at = Date.parse(iso);
+    if (!Number.isNaN(at) && (oldest === null || at < oldest)) oldest = at;
   }
   return oldest;
 }
@@ -2164,6 +2215,9 @@ function renderFrontMatter(model, days, opts) {
     fields.push(['part', opts.part], ['part_of', opts.partOf]);
   }
   if (stats.systemExcluded > 0) fields.push(['system_messages_excluded', stats.systemExcluded]);
+  // 取得範囲を絞った場合は、そのことがファイル単体で分かるようにする
+  if (stats.since) fields.push(['range_since', stats.since]);
+  if (stats.rangeExcluded > 0) fields.push(['out_of_range_excluded', stats.rangeExcluded]);
 
   const body = fields
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
@@ -2456,7 +2510,8 @@ async function runExport(selectors, options) {
   // 会話名が入っていない場合がある（実機で観測）。開始時と終了時の両方を候補にする。
   const titleAtStart = document.title;
 
-  const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile }));
+  const capturedAt = toLocalIso(startedAt);
+  const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile, capturedAt }));
 
   const titleMeta = resolveConversationTitle([titleAtStart, document.title], selectors.conversationTitle, profile);
 
@@ -2473,10 +2528,13 @@ async function runExport(selectors, options) {
     team: titleMeta.team,
     channel: titleMeta.channel,
     chatTitle: titleMeta.chatTitle,
-    capturedAt: toLocalIso(startedAt),
+    capturedAt,
     toolVersion: options.toolVersion || null,
   }, {
     patterns: selectors.patterns,
+    // 取得範囲。スクロールは境界を少し越えて止まるので、出力側でも同じ境界で切る
+    since: options.stopBefore || null,
+    includeSystem: options.includeSystem === true,
     // リンクの形はチャネルとチャットで違う（チャットに parentMessageId を付けると会話を見つけられない）
     permalink: permalinkConfigFor(selectors, profile),
     tenantId: options.tenantId || null,

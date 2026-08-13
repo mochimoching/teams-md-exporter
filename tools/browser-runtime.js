@@ -42,7 +42,8 @@ async function runExport(selectors, options) {
   // 会話名が入っていない場合がある（実機で観測）。開始時と終了時の両方を候補にする。
   const titleAtStart = document.title;
 
-  const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile }));
+  const capturedAt = toLocalIso(startedAt);
+  const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile, capturedAt }));
 
   const titleMeta = resolveConversationTitle([titleAtStart, document.title], selectors.conversationTitle, profile);
 
@@ -59,10 +60,13 @@ async function runExport(selectors, options) {
     team: titleMeta.team,
     channel: titleMeta.channel,
     chatTitle: titleMeta.chatTitle,
-    capturedAt: toLocalIso(startedAt),
+    capturedAt,
     toolVersion: options.toolVersion || null,
   }, {
     patterns: selectors.patterns,
+    // 取得範囲。スクロールは境界を少し越えて止まるので、出力側でも同じ境界で切る
+    since: options.stopBefore || null,
+    includeSystem: options.includeSystem === true,
     // リンクの形はチャネルとチャットで違う（チャットに parentMessageId を付けると会話を見つけられない）
     permalink: permalinkConfigFor(selectors, profile),
     tenantId: options.tenantId || null,

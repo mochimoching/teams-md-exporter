@@ -148,6 +148,74 @@ test('window.TEAMS_COLLECT で上限を上書きでき、打ち切りは truncat
   assert.match(ui.querySelector('.result').textContent, /会話の全体ではありません/);
 });
 
+/* ---- 設定 UI（仕様書 §7-2） ------------------------------------------ */
+
+/** 設定の各要素を取り出す */
+function settingsOf(ui) {
+  const radios = {};
+  for (const radio of ui.querySelectorAll('input[type=radio]')) radios[radio.value] = radio;
+  return {
+    radios,
+    days: ui.querySelector('input[type=number]'),
+    since: ui.querySelector('input[type=date]'),
+    system: ui.querySelector('input[type=checkbox]'),
+  };
+}
+
+test('取得範囲とシステムメッセージの選択肢が用意されている（既定は全件・除外）', () => {
+  const { ui } = mount(channelHtml());
+  const s = settingsOf(ui);
+  assert.deepEqual(Object.keys(s.radios).sort(), ['all', 'days', 'since']);
+  assert.equal(s.radios.all.checked, true, '既定は全件');
+  assert.equal(s.system.checked, false, '既定はシステムメッセージを含めない');
+});
+
+test('「直近N日」を選ぶと、その範囲だけが出力される', async () => {
+  const { window, ui } = mount(channelHtml());
+  const s = settingsOf(ui);
+  s.radios.days.checked = true;
+  s.days.value = '1'; // サンプルは過去の会話なので、直近 1 日なら全部が範囲外
+  ui.querySelector('.run').click();
+  await waitFor(() => window.TEAMS_RESULT, '収集の完了');
+
+  const stats = window.TEAMS_RESULT.stats;
+  assert.ok(stats.since, '取得範囲が記録されていない');
+  assert.ok(stats.rangeExcluded > 0, '範囲外が除外されていない');
+  assert.ok(window.TEAMS_RESULT.warnings.some((w) => w.code === 'out-of-range-excluded'));
+});
+
+test('日数が不正なら実行せず、理由を出す', async () => {
+  const { window, downloads, ui } = mount(channelHtml());
+  const s = settingsOf(ui);
+  s.radios.days.checked = true;
+  s.days.value = '0';
+  ui.querySelector('.run').click();
+
+  await waitFor(() => !ui.querySelector('.result').hidden, 'エラーの表示');
+  assert.match(ui.querySelector('.result').textContent, /1 以上の数を入れてください/);
+  assert.equal(window.TEAMS_RESULT, undefined, '不正な設定なのに収集が走っている');
+  assert.deepEqual(downloads, []);
+});
+
+test('「指定日以降」で日付が空なら実行しない', async () => {
+  const { window, ui } = mount(channelHtml());
+  settingsOf(ui).radios.since.checked = true;
+  ui.querySelector('.run').click();
+
+  await waitFor(() => !ui.querySelector('.result').hidden, 'エラーの表示');
+  assert.match(ui.querySelector('.result').textContent, /開始日を選んでください/);
+  assert.equal(window.TEAMS_RESULT, undefined);
+});
+
+test('システムメッセージを含める指定が収集に伝わる', async () => {
+  const { window, ui } = mount(channelHtml());
+  settingsOf(ui).system.checked = true;
+  ui.querySelector('.run').click();
+  await waitFor(() => window.TEAMS_RESULT, '収集の完了');
+
+  assert.equal(window.TEAMS_RESULT.stats.systemExcluded, 0, '含める指定なのに除外されている');
+});
+
 test('二重に読み込んでも UI は 1 つだけ', () => {
   const { window } = mount(channelHtml());
   window.eval(script);

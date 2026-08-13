@@ -131,6 +131,9 @@ function renderFrontMatter(model, days, opts) {
     fields.push(['part', opts.part], ['part_of', opts.partOf]);
   }
   if (stats.systemExcluded > 0) fields.push(['system_messages_excluded', stats.systemExcluded]);
+  // 取得範囲を絞った場合は、そのことがファイル単体で分かるようにする
+  if (stats.since) fields.push(['range_since', stats.since]);
+  if (stats.rangeExcluded > 0) fields.push(['out_of_range_excluded', stats.rangeExcluded]);
 
   const body = fields
     .filter(([, value]) => value !== null && value !== undefined && value !== '')

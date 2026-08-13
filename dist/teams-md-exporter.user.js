@@ -1395,7 +1395,8 @@ const TOOL_VERSION = '0.1.0';
 /**
  * @param {object} extraction extractConversation() の戻り値
  * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy, threadId }
- * @param {object} options { patterns, permalink?, tenantId?, groupId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
+ * @param {object} options { patterns, permalink?, tenantId?, groupId?, timezoneOffset?, assumeYear?,
+ *   includeSystem?, since?（この日時より前は出力しない）, truncated? }
  * @returns {{source: object, participants: Array, messages: Array, stats: object, warnings: Array}}
  */
 function normalize(extraction, meta = {}, options = {}) {
@@ -1492,7 +1493,7 @@ function normalize(extraction, meta = {}, options = {}) {
   // ただし「何件落としたか」は必ず残す（黙って消さない）。
   const includeSystem = options.includeSystem === true;
   const systemMessages = messages.filter((m) => m.system);
-  const kept = includeSystem ? messages : messages.filter((m) => !m.system);
+  let kept = includeSystem ? messages : messages.filter((m) => !m.system);
   if (!includeSystem && systemMessages.length > 0) {
     warnings.push({
       level: 'info',
@@ -1500,6 +1501,36 @@ function normalize(extraction, meta = {}, options = {}) {
       detail: `システムメッセージ ${systemMessages.length} 件を出力から除外しました（options.includeSystem: true で含められます）`,
     });
   }
+  // 取得範囲（options.since より前は出力しない）。スクロールは境界を少し越えて止まるため、
+  // 指定範囲を厳密にするにはここで落とす必要がある。落とした件数は必ず残す（黙って消さない）。
+  const rangeExcluded = [];
+  if (options.since) {
+    const limit = Date.parse(options.since);
+    if (Number.isNaN(limit)) {
+      warnings.push({
+        level: 'warn',
+        code: 'since-unparsed',
+        detail: `取得範囲の開始日時「${options.since}」を解釈できませんでした（範囲を絞らずに出力します）`,
+      });
+    } else {
+      kept = kept.filter((m) => {
+        // 日時が取れなかったメッセージは判定できないので落とさない（取りこぼしを作らない）
+        if (!m.timestamp) return true;
+        const at = Date.parse(m.timestamp);
+        if (Number.isNaN(at) || at >= limit) return true;
+        rangeExcluded.push(m);
+        return false;
+      });
+      if (rangeExcluded.length > 0) {
+        warnings.push({
+          level: 'info',
+          code: 'out-of-range-excluded',
+          detail: `取得範囲（${options.since} 以降）より古いメッセージ ${rangeExcluded.length} 件を出力から除外しました`,
+        });
+      }
+    }
+  }
+
   kept.sort(byTimestampThenDomOrder);
 
   // リンクを付けられなかったことは黙って隠さない（原則4）。会話 ID が取れなかったのが唯一の原因。
@@ -1556,6 +1587,8 @@ function normalize(extraction, meta = {}, options = {}) {
       rangeStart: stamps[0] || null,
       rangeEnd: stamps[stamps.length - 1] || null,
       systemExcluded: includeSystem ? 0 : systemMessages.length,
+      rangeExcluded: rangeExcluded.length,
+      since: options.since || null,
       permalinkCount: withPermalink,
       truncated,
       replyGaps,
@@ -1881,6 +1914,7 @@ function pad(value, width = 2) {
 
 
 
+
 const DEFAULTS = {
   profile: 'channel',
   /** 1 回のスクロール量（ペインの表示高さに対する割合）。小刻みにして飛ばさない */
@@ -1896,8 +1930,13 @@ const DEFAULTS = {
   maxSteps: 400,
   maxDurationMs: 10 * 60 * 1000,
   maxMessages: Infinity,
-  /** この日時より古いメッセージまで遡ったら停止（ISO 文字列）。到達したら truncated = false */
+  /**
+   * この日時より古いメッセージまで遡ったら停止（ISO 文字列）。到達したら truncated = false。
+   * 相対表記（「昨日の 19:18」）を解決するために capturedAt（取得時刻の ISO）も渡すこと。
+   */
   stopBefore: null,
+  capturedAt: null,
+  timezoneOffset: '+09:00',
   /** 折りたたまれた本文（「詳細を表示」）をクリックして展開する */
   expandBody: true,
   /**
@@ -1927,6 +1966,8 @@ const DEFAULTS = {
  */
 async function collectByScrolling(paneOrGetter, selectors, options = {}) {
   const opts = { ...DEFAULTS, ...options };
+  // stopBefore の判定で日時を解釈するために要る（抽出側は自前でコンパイルするので影響しない）
+  opts.patterns = compilePatterns(selectors.patterns || {});
   let pane = paneOrGetter;
   const sleep = opts.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const now = opts.now || (() => Date.now());
@@ -2246,18 +2287,28 @@ function shouldStop(stats, acc, opts, elapsedMs) {
   if (stats.steps >= opts.maxSteps) return 'max-steps';
   if (elapsedMs >= opts.maxDurationMs) return 'max-duration';
   if (opts.stopBefore) {
-    const oldest = oldestTimestamp(acc);
-    if (oldest && oldest < opts.stopBefore) return 'stop-before-reached';
+    const limit = Date.parse(opts.stopBefore);
+    const oldest = oldestTimestamp(acc, opts);
+    if (oldest !== null && !Number.isNaN(limit) && oldest < limit) return 'stop-before-reached';
   }
   return null;
 }
 
-/** 蓄積済みメッセージのうち最も古い日時（ISO 文字列比較。取れないものは無視） */
-function oldestTimestamp(acc) {
+/**
+ * 蓄積済みメッセージのうち最も古い日時（エポックミリ秒）。取れないものは無視する。
+ *
+ * datetime 属性だけを見ていた頃は **チャネルで常に null になり、stopBefore が無反応**だった
+ * （datetime を持つのはチャットの <time> だけ）。正規化と同じ解釈器を通し、
+ * タイムゾーンの違う文字列を混ぜても壊れないよう数値で比較する。
+ */
+function oldestTimestamp(acc, opts) {
+  const options = { offset: opts.timezoneOffset, capturedAt: opts.capturedAt };
   let oldest = null;
   for (const m of acc.values()) {
-    const iso = m.timestamp && m.timestamp.attributes ? m.timestamp.attributes.datetime : null;
-    if (iso && (!oldest || iso < oldest)) oldest = iso;
+    const { iso } = toIsoTimestamp(m.timestamp, opts.patterns || {}, options);
+    if (!iso) continue;
+    const at = Date.parse(iso);
+    if (!Number.isNaN(at) && (oldest === null || at < oldest)) oldest = at;
   }
   return oldest;
 }
@@ -2425,6 +2476,9 @@ function renderFrontMatter(model, days, opts) {
     fields.push(['part', opts.part], ['part_of', opts.partOf]);
   }
   if (stats.systemExcluded > 0) fields.push(['system_messages_excluded', stats.systemExcluded]);
+  // 取得範囲を絞った場合は、そのことがファイル単体で分かるようにする
+  if (stats.since) fields.push(['range_since', stats.since]);
+  if (stats.rangeExcluded > 0) fields.push(['out_of_range_excluded', stats.rangeExcluded]);
 
   const body = fields
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
@@ -2717,7 +2771,8 @@ async function runExport(selectors, options) {
   // 会話名が入っていない場合がある（実機で観測）。開始時と終了時の両方を候補にする。
   const titleAtStart = document.title;
 
-  const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile }));
+  const capturedAt = toLocalIso(startedAt);
+  const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile, capturedAt }));
 
   const titleMeta = resolveConversationTitle([titleAtStart, document.title], selectors.conversationTitle, profile);
 
@@ -2734,10 +2789,13 @@ async function runExport(selectors, options) {
     team: titleMeta.team,
     channel: titleMeta.channel,
     chatTitle: titleMeta.chatTitle,
-    capturedAt: toLocalIso(startedAt),
+    capturedAt,
     toolVersion: options.toolVersion || null,
   }, {
     patterns: selectors.patterns,
+    // 取得範囲。スクロールは境界を少し越えて止まるので、出力側でも同じ境界で切る
+    since: options.stopBefore || null,
+    includeSystem: options.includeSystem === true,
     // リンクの形はチャネルとチャットで違う（チャットに parentMessageId を付けると会話を見つけられない）
     permalink: permalinkConfigFor(selectors, profile),
     tenantId: options.tenantId || null,
@@ -2811,14 +2869,62 @@ const EXPORTER_STYLE = [
   '.warn{color:#bc4b09}',
   '@media (prefers-color-scheme:dark){.warn{color:#ffb900}}',
   '.note{opacity:.7;margin-top:6px}',
+  'details{margin-top:8px}',
+  'summary{cursor:pointer;opacity:.85}',
+  'fieldset{border:0;margin:6px 0 0;padding:0}',
+  'label{display:flex;align-items:center;gap:4px;margin-top:4px}',
+  'input[type=number]{width:4.5em}',
+  'input[type=date]{font:inherit}',
+  'input[type=number],input[type=date]{padding:2px 4px;border:1px solid rgba(128,128,128,.6);',
+  'border-radius:3px;background:transparent;color:inherit}',
   '[hidden]{display:none}',
 ].join('');
+
+/** 取得範囲の選択肢。value は buildRangeOption() の分岐と対応する */
+const RANGE_CHOICES = [
+  { value: 'all', text: '全件（先頭まで遡る）' },
+  { value: 'days', text: '直近' },
+  { value: 'since', text: '指定日以降' },
+];
 
 /** createElement だけで要素を作る小さなヘルパ（innerHTML を使わないため） */
 function makeEl(tag, props) {
   const el = document.createElement(tag);
   Object.assign(el, props || {});
   return el;
+}
+
+/** ローカルの「その日の 0 時」の ISO（オフセット付き） */
+function startOfDayIso(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return toLocalIso(d);
+}
+
+/**
+ * 設定 UI の値 → 収集オプション（仕様書 §7-2）。
+ * 不正な入力は黙って既定に倒さず、理由を返して実行しない。
+ * @returns {{options: object, error: string|null, label: string}}
+ */
+function buildRangeOption(range, days, sinceDate) {
+  if (range === 'days') {
+    const n = Number(days);
+    if (!Number.isFinite(n) || n < 1) {
+      return { options: null, error: '「直近N日」の日数には 1 以上の数を入れてください', label: '' };
+    }
+    const from = new Date();
+    from.setDate(from.getDate() - Math.floor(n));
+    return { options: { stopBefore: startOfDayIso(from) }, error: null, label: `直近 ${Math.floor(n)} 日` };
+  }
+
+  if (range === 'since') {
+    if (!sinceDate) return { options: null, error: '開始日を選んでください', label: '' };
+    const from = new Date(`${sinceDate}T00:00:00`);
+    if (Number.isNaN(from.getTime())) return { options: null, error: `開始日「${sinceDate}」を解釈できません`, label: '' };
+    return { options: { stopBefore: startOfDayIso(from) }, error: null, label: `${sinceDate} 以降` };
+  }
+
+  return { options: { stopBefore: null }, error: null, label: '全件' };
 }
 
 (function mountExporterUi() {
@@ -2842,11 +2948,57 @@ function mount() {
   const statusEl = makeEl('div', { className: 'status', hidden: true });
   const resultEl = makeEl('div', { className: 'result', hidden: true });
 
+  /* ---- 設定（仕様書 §7-2） ---- */
+  const daysInput = makeEl('input', { type: 'number', min: '1', value: '30' });
+  const sinceInput = makeEl('input', { type: 'date' });
+  const systemCheck = makeEl('input', { type: 'checkbox' });
+  const radios = {};
+
+  const rangeSet = makeEl('fieldset');
+  for (const choice of RANGE_CHOICES) {
+    const radio = makeEl('input', { type: 'radio', name: 'teams-md-range', value: choice.value });
+    radio.checked = choice.value === 'all';
+    radios[choice.value] = radio;
+
+    const label = makeEl('label');
+    label.append(radio, makeEl('span', { textContent: choice.text }));
+    if (choice.value === 'days') label.append(daysInput, makeEl('span', { textContent: '日' }));
+    if (choice.value === 'since') label.append(sinceInput);
+    rangeSet.append(label);
+  }
+
+  // 数値・日付を触ったら、その範囲を選んだものとみなす（ラジオの押し忘れを防ぐ）
+  daysInput.addEventListener('input', () => { radios.days.checked = true; });
+  sinceInput.addEventListener('input', () => { radios.since.checked = true; });
+
+  const systemLabel = makeEl('label');
+  systemLabel.append(systemCheck, makeEl('span', { textContent: 'システムメッセージも含める' }));
+
+  const settings = makeEl('details');
+  settings.append(
+    makeEl('summary', { textContent: '設定' }),
+    makeEl('div', { textContent: '取得範囲', className: 'note' }),
+    rangeSet,
+    systemLabel,
+  );
+
   const panel = makeEl('div', { className: 'panel' });
-  panel.append(runButton, abortButton, statusEl, resultEl);
+  panel.append(runButton, settings, abortButton, statusEl, resultEl);
   root.append(makeEl('style', { textContent: EXPORTER_STYLE }), panel);
 
   let aborting = false;
+
+  /** 現在の設定を収集オプションにする */
+  function currentSettings() {
+    const range = RANGE_CHOICES.map((c) => c.value).find((v) => radios[v].checked) || 'all';
+    const built = buildRangeOption(range, daysInput.value, sinceInput.value);
+    if (built.error) return built;
+    return {
+      options: { ...built.options, includeSystem: systemCheck.checked },
+      error: null,
+      label: built.label + (systemCheck.checked ? '・システムメッセージ込み' : ''),
+    };
+  }
 
   function setStatus(text) {
     statusEl.textContent = text || '';
@@ -2870,6 +3022,8 @@ function mount() {
     addLine(`${s.messageCount} 件を保存しました`);
     addLine(`期間: ${s.rangeStart ? s.rangeStart.slice(0, 10) : '?'} 〜 ${s.rangeEnd ? s.rangeEnd.slice(0, 10) : '?'}`);
     addLine(`メッセージへのリンク: ${s.permalinkCount} / ${s.messageCount}`);
+    if (s.rangeExcluded > 0) addLine(`取得範囲より古い ${s.rangeExcluded} 件は除外しました`);
+    if (s.systemExcluded > 0) addLine(`システムメッセージ ${s.systemExcluded} 件は除外しました`);
     for (const file of files) addLine(file.filename);
 
     if (s.truncated) {
@@ -2880,11 +3034,19 @@ function mount() {
   }
 
   runButton.addEventListener('click', async () => {
+    const settingsResult = currentSettings();
+    if (settingsResult.error) {
+      clearResult();
+      addLine(settingsResult.error, 'warn');
+      settings.open = true;
+      return;
+    }
+
     runButton.disabled = true;
     abortButton.hidden = false;
     aborting = false;
     clearResult();
-    setStatus('会話の先頭まで遡ります…');
+    setStatus(`収集を開始します（${settingsResult.label}）…`);
 
     try {
       const { model, files } = await runExport(SELECTORS, Object.assign({
@@ -2893,7 +3055,7 @@ function mount() {
         toolVersion: EXPORTER_VERSION,
         onProgress: ({ step, collected }) => setStatus(`${step} 周目 / ${collected} 件を収集中…`),
         shouldAbort: () => aborting,
-      }, window.TEAMS_COLLECT || {}));
+      }, settingsResult.options, window.TEAMS_COLLECT || {}));
 
       window.TEAMS_RESULT = model;
       window.TEAMS_FILES = files;
