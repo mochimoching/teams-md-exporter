@@ -4,14 +4,17 @@
  */
 
 import { extractConversation, extractConversationId, extractMessage } from './extract.js';
-import { buildPermalink, normalize, permalinkConfigFor, toIsoTimestamp, parseReaction } from './normalize.js';
+import {
+  buildPermalink, normalize, parseConversationTitle, permalinkConfigFor, toIsoTimestamp, parseReaction,
+} from './normalize.js';
 import { htmlToMarkdown } from './html-to-markdown.js';
 import { collectByScrolling, findConversationPane } from './scroll-driver.js';
 import { buildFilename, renderMarkdown, renderMarkdownFiles } from './markdown-renderer.js';
 
 export {
   extractConversation, extractConversationId, extractMessage,
-  normalize, toIsoTimestamp, parseReaction, buildPermalink, permalinkConfigFor, htmlToMarkdown,
+  normalize, toIsoTimestamp, parseReaction, parseConversationTitle,
+  buildPermalink, permalinkConfigFor, htmlToMarkdown,
   collectByScrolling, findConversationPane,
   renderMarkdown, renderMarkdownFiles, buildFilename,
 };

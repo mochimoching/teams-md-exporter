@@ -58,6 +58,7 @@ window.TEAMS_SAVE_JSON = true;  // 中間モデルの JSON も保存する
 | 警告の内訳 | `collapsed-body` や `replies-not-expanded` は仕様どおりの報告 | 見慣れないコードが出たら教えてほしい |
 | 最古・最新のプレビュー | 実際の投稿と一致 | 本文の変換に問題 |
 | 保存された .md | 日付見出し・返信のぶら下げ・添付・リアクションが読める形 | レンダラの問題 |
+| ファイル名 | `teams_channel_DTS-911_プロパー_20260813-1830.md` のように会話名が入る | `チャネル` / `チャット` のままなら `conversation-title-unparsed` が出ている |
 
 `expandReplies: true` を試す場合は、**スレッドが Esc で閉じたか**（`reply-thread-not-closed` 警告が出ていないか）と、
 閉じたあとスクロールが続いたか（`pane-lost` 警告が出ていないか）を見てほしい。閉じるボタンの `data-tid` が分かれば

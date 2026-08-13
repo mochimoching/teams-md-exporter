@@ -58,6 +58,8 @@ if (!pane) {
 } else {
   console.log('[teams-md] 収集開始:', { profile, pane: pane.getAttribute('data-tid'), options });
   const startedAt = new Date();
+  // 会話名はタブのタイトルから取る。収集中に未読数などで変わりうるので、開始時点の値を使う
+  const titleMeta = parseConversationTitle(document.title, SELECTORS.conversationTitle, profile);
   const collected = await collectByScrolling(pane, SELECTORS, Object.assign({}, options, {
     profile,
     onProgress: ({ step, collected: count, gained }) => {
@@ -69,11 +71,15 @@ if (!pane) {
   // 本文に貼られた他会話のリンクを拾わないよう、専用の属性を持つ要素だけを見ている。
   const conversation = extractConversationId(document.body, SELECTORS, { profile });
   conversation.warnings.forEach((w) => collected.warnings.push(w));
+  titleMeta.warnings.forEach((w) => collected.warnings.push(w));
 
   const model = normalize(collected, {
     kind: profile,
     url: location.href,
     threadId: conversation.threadId,
+    team: titleMeta.team,
+    channel: titleMeta.channel,
+    chatTitle: titleMeta.chatTitle,
     capturedAt: toLocalIso(startedAt),
     toolVersion: '${version}',
   }, {

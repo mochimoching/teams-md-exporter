@@ -1312,6 +1312,43 @@ function normalize(extraction, meta = {}, options = {}) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 画面（ブラウザのタブ）のタイトルから会話名を取り出す。
+ *
+ * 純粋関数。document には触れず、タイトル文字列を受け取るだけ。
+ * 実測値（2026-08-13）:
+ *   チャネル: '(3) チームとチャネル | DTS | 911_プロパー(星野PL-R＆D) | Microsoft Teams'
+ *   チャット: '(3) チャット | ベトナム案件-DTSメンバのみ | Microsoft Teams'
+ * 先頭のセクション名（未読数が付くことがある）と末尾のアプリ名は UI 言語依存なので、
+ * 文字列一致ではなく位置で落とす。設定は selectors.json の conversationTitle。
+ *
+ * @returns {{team: string|null, channel: string|null, chatTitle: string|null, warnings: Array}}
+ */
+function parseConversationTitle(title, config, profile) {
+  const result = { team: null, channel: null, chatTitle: null, warnings: [] };
+  const fields = config && profile ? config[profile] : null;
+  if (!config || !config.separator || !Array.isArray(fields) || fields.length === 0) return result;
+
+  const segments = String(title || '').split(config.separator).map(normalizeSpace).filter(Boolean);
+  const rest = segments.slice(config.dropLeading || 0, segments.length - (config.dropTrailing || 0));
+
+  if (rest.length < fields.length) {
+    result.warnings.push({
+      level: 'info',
+      code: 'conversation-title-unparsed',
+      detail: `画面のタイトル「${title}」から会話名を取り出せませんでした（ファイル名は既定の名前になります）`,
+    });
+    return result;
+  }
+
+  // 会話名に区切り文字が含まれていても失わないよう、余った分は最後のフィールドに戻す
+  fields.forEach((field, index) => {
+    const isLast = index === fields.length - 1;
+    result[field] = isLast ? rest.slice(index).join(config.separator) : rest[index];
+  });
+  return result;
+}
+
+/**
  * 会話種別に対応するリンク設定を取り出す。チャネルとチャットで URL の形が違う。
  * @returns {object|null}
  */
@@ -2530,6 +2567,15 @@ const SELECTORS = {
     "skipImageUrl": "^blob:"
   },
 
+  "conversationTitle": {
+    "note": "会話名は画面（ブラウザのタブ）のタイトルから取る。2026-08-13 実測: チャネル '(3) チームとチャネル | DTS | 911_プロパー(星野PL-R＆D) | Microsoft Teams' / チャット '(3) チャット | ベトナム案件-DTSメンバのみ | Microsoft Teams'。先頭はアプリ内のセクション名（未読数 '(3) ' が付くことがある）、末尾はアプリ名で、どちらも UI 言語依存。そのため文字列一致ではなく位置で落とす。会話名自体に区切り文字が含まれる場合は、最後のフィールドに区切りごと戻して入れる（チーム名に含まれる場合だけは分離できない）。",
+    "separator": " | ",
+    "dropLeading": 1,
+    "dropTrailing": 1,
+    "channel": ["team", "channel"],
+    "chat": ["chatTitle"]
+  },
+
   "permalink": {
     "note": "個々のメッセージへのディープリンク。**チャネルとチャットで形が違う**ので会話種別ごとに分けてある。Teams の「リンクをコピー」が実際に出す URL に合わせること。base のプレースホルダが 1 つでも埋まらなければリンクを作らない（推測で URL を組み立てない）。params は値が無いものを落とす。テンプレートの地の文はそのまま出し、{…} に埋める値だけ URL エンコードする（Teams 実物の書き方を 1 文字も変えずに再現するため）。tenantId は DOM から確実に取れないため既定では付けない（options.tenantId で明示指定できる）。",
     "channel": {
@@ -2602,6 +2648,8 @@ if (!pane) {
 } else {
   console.log('[teams-md] 収集開始:', { profile, pane: pane.getAttribute('data-tid'), options });
   const startedAt = new Date();
+  // 会話名はタブのタイトルから取る。収集中に未読数などで変わりうるので、開始時点の値を使う
+  const titleMeta = parseConversationTitle(document.title, SELECTORS.conversationTitle, profile);
   const collected = await collectByScrolling(pane, SELECTORS, Object.assign({}, options, {
     profile,
     onProgress: ({ step, collected: count, gained }) => {
@@ -2613,11 +2661,15 @@ if (!pane) {
   // 本文に貼られた他会話のリンクを拾わないよう、専用の属性を持つ要素だけを見ている。
   const conversation = extractConversationId(document.body, SELECTORS, { profile });
   conversation.warnings.forEach((w) => collected.warnings.push(w));
+  titleMeta.warnings.forEach((w) => collected.warnings.push(w));
 
   const model = normalize(collected, {
     kind: profile,
     url: location.href,
     threadId: conversation.threadId,
+    team: titleMeta.team,
+    channel: titleMeta.channel,
+    chatTitle: titleMeta.chatTitle,
     capturedAt: toLocalIso(startedAt),
     toolVersion: '0.1.0',
   }, {

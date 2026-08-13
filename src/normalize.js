@@ -191,6 +191,43 @@ export function normalize(extraction, meta = {}, options = {}) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 画面（ブラウザのタブ）のタイトルから会話名を取り出す。
+ *
+ * 純粋関数。document には触れず、タイトル文字列を受け取るだけ。
+ * 実測値（2026-08-13）:
+ *   チャネル: '(3) チームとチャネル | DTS | 911_プロパー(星野PL-R＆D) | Microsoft Teams'
+ *   チャット: '(3) チャット | ベトナム案件-DTSメンバのみ | Microsoft Teams'
+ * 先頭のセクション名（未読数が付くことがある）と末尾のアプリ名は UI 言語依存なので、
+ * 文字列一致ではなく位置で落とす。設定は selectors.json の conversationTitle。
+ *
+ * @returns {{team: string|null, channel: string|null, chatTitle: string|null, warnings: Array}}
+ */
+export function parseConversationTitle(title, config, profile) {
+  const result = { team: null, channel: null, chatTitle: null, warnings: [] };
+  const fields = config && profile ? config[profile] : null;
+  if (!config || !config.separator || !Array.isArray(fields) || fields.length === 0) return result;
+
+  const segments = String(title || '').split(config.separator).map(normalizeSpace).filter(Boolean);
+  const rest = segments.slice(config.dropLeading || 0, segments.length - (config.dropTrailing || 0));
+
+  if (rest.length < fields.length) {
+    result.warnings.push({
+      level: 'info',
+      code: 'conversation-title-unparsed',
+      detail: `画面のタイトル「${title}」から会話名を取り出せませんでした（ファイル名は既定の名前になります）`,
+    });
+    return result;
+  }
+
+  // 会話名に区切り文字が含まれていても失わないよう、余った分は最後のフィールドに戻す
+  fields.forEach((field, index) => {
+    const isLast = index === fields.length - 1;
+    result[field] = isLast ? rest.slice(index).join(config.separator) : rest[index];
+  });
+  return result;
+}
+
+/**
  * 会話種別に対応するリンク設定を取り出す。チャネルとチャットで URL の形が違う。
  * @returns {object|null}
  */
