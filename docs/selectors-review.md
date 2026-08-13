@@ -155,7 +155,7 @@ tools/check-samples.js        全サンプルでの命中率レポート
 - セレクタは **コード内に一切書かない**（`tests/selectors-policy.test.js` が `src/` を機械検査）。
 - 取りこぼし・欠落は必ず `warnings[]` に積む（`fatal` / `warn` / `info`）。抽出 0 件は fatal。
 
-### テスト（`npm test`: 79 件）
+### テスト（`npm test`: 80 件）
 
 採取した実 DOM をそのまま読み込んで検証しています（テスト用に HTML を書き換えていない）。
 件数の固定値はサンプルを採り直すと変わるため、原則は「全件で取れていること」を検査しています。
@@ -218,7 +218,18 @@ DOM サンプルには材料が無かったため、実機のコンソールで�
 | 会話 | クエリ | 確認状況 |
 |---|---|---|
 | チャット | `?context={"contextType"%3A"chat"}` | **実機の「リンクをコピー」と 1 文字まで一致**（2026-08-13） |
-| チャネル | `?parentMessageId={parentId}` | **未確認**。実物と突き合わせていない |
+| チャネル | `?tenantId=…&groupId=…&parentMessageId=…&createdTime=…&ngc=true` | 実物と突き合わせ済み。ただし `tenantId` / `groupId` は DOM から取れないため、指定が無ければ落とす |
+
+チャネルの実物（2026-08-13）:
+
+```
+?tenantId=…&groupId=…&parentMessageId=1786521292457&teamName=DTS&channelName=911_…&createdTime=1786525125055&ngc=true
+```
+
+- `createdTime` は **`messageId` と同じ値**だった。
+- `parentMessageId` は実装が出した値と一致していた（親の解決は正しい）。
+- `teamName` / `channelName` は表示名なので付けない（会話は `threadId` で一意に決まる）。
+- `tenantId` / `groupId` は DOM 内の取得元が未確定。`window.TEAMS_COLLECT = { tenantId, groupId }` で渡せる。
 
 - `messageId` は既存の `data-mid`、`parentId` は返信なら親投稿の ID、投稿本体なら自分自身。
 - パス部の `19:…@thread.tacv2` はエスケープしない（実物のリンクが生のまま）。

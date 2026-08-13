@@ -65,16 +65,41 @@ test('会話 ID が見つからなければ警告し、null を返す', () => {
 const channelConfig = permalinkConfigFor(selectors, 'channel');
 const chatConfig = permalinkConfigFor(selectors, 'chat');
 
-test('チャネルのリンクはパス部を素のまま、parentMessageId を付ける', () => {
+test('チャネルのリンクはパス部を素のまま、取れた値だけをクエリに載せる', () => {
   const url = buildPermalink(channelConfig, {
     threadId: CHANNEL_THREAD,
     messageId: '1785145811391',
     parentId: '1785145811391',
     tenantId: null,
+    groupId: null,
   });
   assert.equal(
     url,
-    `https://teams.microsoft.com/l/message/${CHANNEL_THREAD}/1785145811391?parentMessageId=1785145811391`,
+    `https://teams.microsoft.com/l/message/${CHANNEL_THREAD}/1785145811391`
+    + '?parentMessageId=1785145811391&createdTime=1785145811391&ngc=true',
+  );
+});
+
+/**
+ * 2026-08-13 に実機の「リンクをコピー」で得た URL と、載せる項目・順序・値を揃える。
+ * teamName / channelName は表示名なので付けない（無くても会話は一意に決まる）。
+ */
+test('tenantId と groupId を渡すと実物と同じ並びになる', () => {
+  const url = buildPermalink(channelConfig, {
+    threadId: '19:5bd8f4d415f642f1949fbe396f62ff4d@thread.tacv2',
+    messageId: '1786525125055',
+    parentId: '1786521292457',
+    tenantId: '1fcf450d-bb71-4efd-ae5d-90c7be757e12',
+    groupId: '32e1ccdc-2f4c-4eaf-8346-8910d0cf0195',
+  });
+  assert.equal(
+    url,
+    'https://teams.microsoft.com/l/message/19:5bd8f4d415f642f1949fbe396f62ff4d@thread.tacv2/1786525125055'
+    + '?tenantId=1fcf450d-bb71-4efd-ae5d-90c7be757e12'
+    + '&groupId=32e1ccdc-2f4c-4eaf-8346-8910d0cf0195'
+    + '&parentMessageId=1786521292457'
+    + '&createdTime=1786525125055'
+    + '&ngc=true',
   );
 });
 
@@ -140,8 +165,8 @@ function buildModel(meta = {}, options = {}) {
 test('投稿は自分自身、返信は親を parentMessageId にする', () => {
   const model = buildModel({ threadId: CHANNEL_THREAD });
   const [post, reply] = model.messages;
-  assert.match(post.permalink, /\/1000\?parentMessageId=1000$/);
-  assert.match(reply.permalink, /\/1001\?parentMessageId=1000$/);
+  assert.match(post.permalink, /\/1000\?parentMessageId=1000&/);
+  assert.match(reply.permalink, /\/1001\?parentMessageId=1000&/);
   assert.equal(model.source.threadId, CHANNEL_THREAD);
   assert.equal(model.stats.permalinkCount, 2);
 });

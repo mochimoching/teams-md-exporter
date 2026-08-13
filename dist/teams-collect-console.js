@@ -16,8 +16,9 @@
  *   window.TEAMS_COLLECT = { expandReplies: true };
  * 保存せず結果だけ見たいとき:
  *   window.TEAMS_SAVE_MD = false;
- * 各メッセージへのリンクにテナント ID を付けるとき（複数テナントに所属している場合に有効）:
- *   window.TEAMS_COLLECT = { tenantId: '（自組織のテナント ID）' };
+ * リンクが Teams アプリで開かないとき（チャネルは tenantId / groupId が要る場合がある。
+ * 実物の URL は投稿の「…」→「リンクをコピー」で確認できる）:
+ *   window.TEAMS_COLLECT = { tenantId: '…', groupId: '…' };
  *
  * 行うのは会話ペインのスクロールと「詳細を表示」の展開だけです。
  * 認証情報には触れず、ネットワークへ送信もしません（CLAUDE.md 原則1・2）。
@@ -1132,7 +1133,7 @@ const TOOL_VERSION = '0.1.0';
 /**
  * @param {object} extraction extractConversation() の戻り値
  * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy, threadId }
- * @param {object} options { patterns, permalink?, tenantId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
+ * @param {object} options { patterns, permalink?, tenantId?, groupId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
  * @returns {{source: object, participants: Array, messages: Array, stats: object, warnings: Array}}
  */
 function normalize(extraction, meta = {}, options = {}) {
@@ -1203,6 +1204,7 @@ function normalize(extraction, meta = {}, options = {}) {
         // Teams のディープリンクは投稿本体でも parentMessageId を要求する（親は自分自身）
         parentId: raw.parentId ?? raw.id,
         tenantId: options.tenantId || null,
+        groupId: options.groupId || null,
       }),
       author: raw.author || null,
       authorInherited: Boolean(raw.authorInherited),
@@ -2531,10 +2533,14 @@ const SELECTORS = {
   "permalink": {
     "note": "個々のメッセージへのディープリンク。**チャネルとチャットで形が違う**ので会話種別ごとに分けてある。Teams の「リンクをコピー」が実際に出す URL に合わせること。base のプレースホルダが 1 つでも埋まらなければリンクを作らない（推測で URL を組み立てない）。params は値が無いものを落とす。テンプレートの地の文はそのまま出し、{…} に埋める値だけ URL エンコードする（Teams 実物の書き方を 1 文字も変えずに再現するため）。tenantId は DOM から確実に取れないため既定では付けない（options.tenantId で明示指定できる）。",
     "channel": {
+      "_status": "2026-08-13 に実機の「リンクをコピー」と突き合わせた。実物は ?tenantId=…&groupId=…&parentMessageId=…&teamName=…&channelName=…&createdTime=…&ngc=true。createdTime は messageId と同じ値だった。parentMessageId は実装の値と一致（親の解決は正しい）。tenantId / groupId は DOM から取れる場所が未確定のため options で受け取る（未指定なら落とす）。teamName / channelName は表示名で、URL に載っても表示用と見られるため付けない。",
       "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
       "params": {
         "tenantId": "{tenantId}",
-        "parentMessageId": "{parentId}"
+        "groupId": "{groupId}",
+        "parentMessageId": "{parentId}",
+        "createdTime": "{messageId}",
+        "ngc": "true"
       }
     },
     "chat": {
@@ -2619,6 +2625,7 @@ if (!pane) {
     // リンクの形はチャネルとチャットで違う（チャットに parentMessageId を付けるとアプリが会話を見つけられない）
     permalink: permalinkConfigFor(SELECTORS, profile),
     tenantId: options.tenantId || null,
+    groupId: options.groupId || null,
     truncated: collected.truncated,
   });
   model.stats.scroll = collected.stats;

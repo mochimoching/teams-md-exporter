@@ -81,6 +81,7 @@ if (!pane) {
     // リンクの形はチャネルとチャットで違う（チャットに parentMessageId を付けるとアプリが会話を見つけられない）
     permalink: permalinkConfigFor(SELECTORS, profile),
     tenantId: options.tenantId || null,
+    groupId: options.groupId || null,
     truncated: collected.truncated,
   });
   model.stats.scroll = collected.stats;
@@ -189,8 +190,9 @@ const banner = `/**
  *   window.TEAMS_COLLECT = { expandReplies: true };
  * 保存せず結果だけ見たいとき:
  *   window.TEAMS_SAVE_MD = false;
- * 各メッセージへのリンクにテナント ID を付けるとき（複数テナントに所属している場合に有効）:
- *   window.TEAMS_COLLECT = { tenantId: '（自組織のテナント ID）' };
+ * リンクが Teams アプリで開かないとき（チャネルは tenantId / groupId が要る場合がある。
+ * 実物の URL は投稿の「…」→「リンクをコピー」で確認できる）:
+ *   window.TEAMS_COLLECT = { tenantId: '…', groupId: '…' };
  *
  * 行うのは会話ペインのスクロールと「詳細を表示」の展開だけです。
  * 認証情報には触れず、ネットワークへ送信もしません（CLAUDE.md 原則1・2）。

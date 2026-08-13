@@ -12,7 +12,7 @@ const TOOL_VERSION = '0.1.0';
 /**
  * @param {object} extraction extractConversation() の戻り値
  * @param {object} meta  { kind, team, channel, chatTitle, url, capturedAt, capturedBy, threadId }
- * @param {object} options { patterns, permalink?, tenantId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
+ * @param {object} options { patterns, permalink?, tenantId?, groupId?, timezoneOffset?, assumeYear?, includeSystem?, truncated? }
  * @returns {{source: object, participants: Array, messages: Array, stats: object, warnings: Array}}
  */
 export function normalize(extraction, meta = {}, options = {}) {
@@ -83,6 +83,7 @@ export function normalize(extraction, meta = {}, options = {}) {
         // Teams のディープリンクは投稿本体でも parentMessageId を要求する（親は自分自身）
         parentId: raw.parentId ?? raw.id,
         tenantId: options.tenantId || null,
+        groupId: options.groupId || null,
       }),
       author: raw.author || null,
       authorInherited: Boolean(raw.authorInherited),

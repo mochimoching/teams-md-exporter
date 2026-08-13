@@ -27,11 +27,13 @@ window.TEAMS_COLLECT = { expandReplies: true };
 ```
 
 各メッセージの見出しには、Teams の該当メッセージを開くリンク `[🔗](…)` が付く。
-複数テナントに所属していてリンクが開かない場合は、テナント ID を明示する:
+リンクが Teams アプリで開かない場合は、`tenantId` / `groupId` を明示する（チャネルで要る場合がある）:
 
 ```js
-window.TEAMS_COLLECT = { tenantId: '（自組織のテナント ID）' };
+window.TEAMS_COLLECT = { tenantId: '…', groupId: '…' };
 ```
+
+値は、対象チャネルの投稿で「…」→「リンクをコピー」した実物の URL に含まれている。
 
 保存せず結果だけ見たいとき / 中間データ（JSON）も保存したいとき:
 
