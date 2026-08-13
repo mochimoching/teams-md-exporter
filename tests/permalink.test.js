@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 import { extractConversationId } from '../src/extract.js';
-import { buildPermalink, normalize } from '../src/normalize.js';
+import { buildPermalink, normalize, permalinkConfigFor } from '../src/normalize.js';
 import { renderMarkdown } from '../src/markdown-renderer.js';
 import { loadSelectors } from './fixtures.js';
 
@@ -62,8 +62,11 @@ test('会話 ID が見つからなければ警告し、null を返す', () => {
   assert.equal(warnings[0].code, 'conversation-id-not-found');
 });
 
-test('URL はパス部を素のまま、クエリだけエスケープして組み立てる', () => {
-  const url = buildPermalink(selectors.permalink, {
+const channelConfig = permalinkConfigFor(selectors, 'channel');
+const chatConfig = permalinkConfigFor(selectors, 'chat');
+
+test('チャネルのリンクはパス部を素のまま、parentMessageId を付ける', () => {
+  const url = buildPermalink(channelConfig, {
     threadId: CHANNEL_THREAD,
     messageId: '1785145811391',
     parentId: '1785145811391',
@@ -75,8 +78,26 @@ test('URL はパス部を素のまま、クエリだけエスケープして組�
   );
 });
 
-test('tenantId を渡したときだけクエリに載る', () => {
-  const url = buildPermalink(selectors.permalink, {
+/**
+ * 2026-08-13 に実機の「リンクをコピー」で得た URL と 1 文字も違わないこと。
+ * parentMessageId を付けるとデスクトップアプリが「チームを見つけることができません」になる。
+ */
+test('チャットのリンクは Teams の「リンクをコピー」と完全に一致する', () => {
+  const url = buildPermalink(chatConfig, {
+    threadId: '19:meeting_YTQwNTM2MGYtNzI3OS00ZjkzLThmYTMtNzRhYTY4ODc2OWYz@thread.v2',
+    messageId: '1786605485086',
+    parentId: '1786605485086',
+    tenantId: null,
+  });
+  assert.equal(
+    url,
+    'https://teams.microsoft.com/l/message/19:meeting_YTQwNTM2MGYtNzI3OS00ZjkzLThmYTMtNzRhYTY4ODc2OWYz@thread.v2/1786605485086?context={"contextType"%3A"chat"}',
+  );
+  assert.doesNotMatch(url, /parentMessageId/);
+});
+
+test('tenantId を渡したときだけチャネルのクエリに載る', () => {
+  const url = buildPermalink(channelConfig, {
     threadId: CHANNEL_THREAD,
     messageId: '100',
     parentId: '100',
@@ -86,8 +107,14 @@ test('tenantId を渡したときだけクエリに載る', () => {
 });
 
 test('会話 ID が無ければ URL を推測で作らない', () => {
-  assert.equal(buildPermalink(selectors.permalink, { threadId: null, messageId: '100', parentId: '100' }), null);
-  assert.equal(buildPermalink(selectors.permalink, { threadId: CHANNEL_THREAD, messageId: null }), null);
+  assert.equal(buildPermalink(channelConfig, { threadId: null, messageId: '100', parentId: '100' }), null);
+  assert.equal(buildPermalink(channelConfig, { threadId: CHANNEL_THREAD, messageId: null }), null);
+});
+
+test('リンク設定は会話種別ごとに用意されている', () => {
+  assert.ok(channelConfig && chatConfig, 'channel / chat 両方の設定が要る');
+  assert.notDeepEqual(channelConfig.params, chatConfig.params, 'チャネルとチャットで URL の形は違う');
+  assert.equal(permalinkConfigFor(selectors, 'unknown-profile'), null);
 });
 
 /* ---- 中間モデル・Markdown まで ---------------------------------------- */
@@ -105,7 +132,7 @@ const extraction = {
 function buildModel(meta = {}, options = {}) {
   return normalize(extraction, { kind: 'channel', capturedAt: '2026-08-13T10:00:00+09:00', ...meta }, {
     patterns: selectors.patterns,
-    permalink: selectors.permalink,
+    permalink: permalinkConfigFor(selectors, 'channel'),
     ...options,
   });
 }

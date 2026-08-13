@@ -78,7 +78,8 @@ if (!pane) {
     toolVersion: '${version}',
   }, {
     patterns: SELECTORS.patterns,
-    permalink: SELECTORS.permalink,
+    // リンクの形はチャネルとチャットで違う（チャットに parentMessageId を付けるとアプリが会話を見つけられない）
+    permalink: permalinkConfigFor(SELECTORS, profile),
     tenantId: options.tenantId || null,
     truncated: collected.truncated,
   });

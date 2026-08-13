@@ -192,11 +192,20 @@
   },
 
   "permalink": {
-    "note": "個々のメッセージへのディープリンク。base のプレースホルダが 1 つでも埋まらなければリンクを作らない（推測で URL を組み立てない）。params は値が無いものを落とす。tenantId は DOM から確実に取れないため既定では付けない（options.tenantId で明示指定できる）。",
-    "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
-    "params": {
-      "tenantId": "{tenantId}",
-      "parentMessageId": "{parentId}"
+    "note": "個々のメッセージへのディープリンク。**チャネルとチャットで形が違う**ので会話種別ごとに分けてある。Teams の「リンクをコピー」が実際に出す URL に合わせること。base のプレースホルダが 1 つでも埋まらなければリンクを作らない（推測で URL を組み立てない）。params は値が無いものを落とす。テンプレートの地の文はそのまま出し、{…} に埋める値だけ URL エンコードする（Teams 実物の書き方を 1 文字も変えずに再現するため）。tenantId は DOM から確実に取れないため既定では付けない（options.tenantId で明示指定できる）。",
+    "channel": {
+      "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
+      "params": {
+        "tenantId": "{tenantId}",
+        "parentMessageId": "{parentId}"
+      }
+    },
+    "chat": {
+      "_status": "2026-08-13 に実機の「リンクをコピー」と突き合わせて確定。parentMessageId を付けるとデスクトップアプリが「チームを見つけることができません」になる（チャネル投稿として解釈されるため）。context の値は Teams 実物が ':' だけを %3A にした形なので、それをそのまま写している。",
+      "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
+      "params": {
+        "context": "{\"contextType\"%3A\"chat\"}"
+      }
     }
   },
 

@@ -190,11 +190,26 @@ export function normalize(extraction, meta = {}, options = {}) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 会話種別に対応するリンク設定を取り出す。チャネルとチャットで URL の形が違う。
+ * @returns {object|null}
+ */
+export function permalinkConfigFor(selectors, profile) {
+  const config = selectors && selectors.permalink;
+  if (!config || !profile) return null;
+  const forProfile = config[profile];
+  return forProfile && forProfile.base ? forProfile : null;
+}
+
+/**
  * 個々のメッセージへのディープリンクを組み立てる（設定は selectors.json の permalink）。
  *
  * base のプレースホルダが 1 つでも埋まらなければ null を返す（推測で URL を作らない）。
- * params は値のあるものだけを残す。パス部は Teams のリンクが生の '19:…@thread.tacv2' を
- * そのまま使っているためエスケープせず、クエリ値だけを encodeURIComponent する。
+ * params は値のあるものだけを残す。
+ *
+ * エスケープの方針: **テンプレートの地の文はそのまま出し、{…} に埋める値だけ encodeURIComponent する。**
+ * Teams の実物のリンクは、パス部が生の '19:…@thread.tacv2'、チャットの context が
+ * '{"contextType"%3A"chat"}'（':' だけを %3A にした形）と独特なので、
+ * 設定に書いたとおりの文字列をそのまま再現できるようにしてある。
  *
  * @param {object|null} config { base: string, params?: object }
  * @param {object} values { threadId, messageId, parentId, tenantId }
@@ -202,19 +217,22 @@ export function normalize(extraction, meta = {}, options = {}) {
  */
 export function buildPermalink(config, values = {}) {
   if (!config || !config.base) return null;
-  const base = fillTemplate(config.base, values);
+  const base = fillTemplate(config.base, values, false);
   if (base == null) return null;
 
   const query = Object.entries(config.params || {})
-    .map(([key, template]) => [key, fillTemplate(template, values)])
+    .map(([key, template]) => [key, fillTemplate(template, values, true)])
     .filter(([, value]) => value != null && value !== '')
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+    .map(([key, value]) => `${key}=${value}`);
 
   return query.length > 0 ? `${base}?${query.join('&')}` : base;
 }
 
-/** '{a}/{b}' を values で埋める。埋まらないプレースホルダがあれば null。 */
-function fillTemplate(template, values) {
+/**
+ * '{a}/{b}' を values で埋める。埋まらないプレースホルダがあれば null。
+ * @param {boolean} encodeValues 埋めた値を URL エンコードするか（地の文は常にそのまま）
+ */
+function fillTemplate(template, values, encodeValues) {
   if (typeof template !== 'string') return null;
   let missing = false;
   const filled = template.replace(/\{(\w+)\}/g, (_, key) => {
@@ -223,7 +241,7 @@ function fillTemplate(template, values) {
       missing = true;
       return '';
     }
-    return String(value);
+    return encodeValues ? encodeURIComponent(value) : String(value);
   });
   return missing ? null : filled;
 }

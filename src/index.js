@@ -4,14 +4,14 @@
  */
 
 import { extractConversation, extractConversationId, extractMessage } from './extract.js';
-import { buildPermalink, normalize, toIsoTimestamp, parseReaction } from './normalize.js';
+import { buildPermalink, normalize, permalinkConfigFor, toIsoTimestamp, parseReaction } from './normalize.js';
 import { htmlToMarkdown } from './html-to-markdown.js';
 import { collectByScrolling, findConversationPane } from './scroll-driver.js';
 import { buildFilename, renderMarkdown, renderMarkdownFiles } from './markdown-renderer.js';
 
 export {
   extractConversation, extractConversationId, extractMessage,
-  normalize, toIsoTimestamp, parseReaction, buildPermalink, htmlToMarkdown,
+  normalize, toIsoTimestamp, parseReaction, buildPermalink, permalinkConfigFor, htmlToMarkdown,
   collectByScrolling, findConversationPane,
   renderMarkdown, renderMarkdownFiles, buildFilename,
 };
@@ -26,7 +26,11 @@ export {
  */
 export function extractToModel(rootEl, selectors, meta = {}, options = {}) {
   const extraction = extractConversation(rootEl, selectors, options);
-  return normalize(extraction, meta, { ...options, patterns: selectors.patterns, permalink: selectors.permalink });
+  return normalize(extraction, meta, {
+    ...options,
+    patterns: selectors.patterns,
+    permalink: permalinkConfigFor(selectors, options.profile || 'channel'),
+  });
 }
 
 /**
@@ -58,7 +62,7 @@ export async function collectToModel(rootEl, selectors, meta = {}, options = {})
   const model = normalize(collected, metaWithThread, {
     ...options,
     patterns: selectors.patterns,
-    permalink: selectors.permalink,
+    permalink: permalinkConfigFor(selectors, profile),
     truncated: collected.truncated,
   });
   model.stats.scroll = collected.stats;

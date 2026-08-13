@@ -1310,11 +1310,26 @@ function normalize(extraction, meta = {}, options = {}) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 会話種別に対応するリンク設定を取り出す。チャネルとチャットで URL の形が違う。
+ * @returns {object|null}
+ */
+function permalinkConfigFor(selectors, profile) {
+  const config = selectors && selectors.permalink;
+  if (!config || !profile) return null;
+  const forProfile = config[profile];
+  return forProfile && forProfile.base ? forProfile : null;
+}
+
+/**
  * 個々のメッセージへのディープリンクを組み立てる（設定は selectors.json の permalink）。
  *
  * base のプレースホルダが 1 つでも埋まらなければ null を返す（推測で URL を作らない）。
- * params は値のあるものだけを残す。パス部は Teams のリンクが生の '19:…@thread.tacv2' を
- * そのまま使っているためエスケープせず、クエリ値だけを encodeURIComponent する。
+ * params は値のあるものだけを残す。
+ *
+ * エスケープの方針: **テンプレートの地の文はそのまま出し、{…} に埋める値だけ encodeURIComponent する。**
+ * Teams の実物のリンクは、パス部が生の '19:…@thread.tacv2'、チャットの context が
+ * '{"contextType"%3A"chat"}'（':' だけを %3A にした形）と独特なので、
+ * 設定に書いたとおりの文字列をそのまま再現できるようにしてある。
  *
  * @param {object|null} config { base: string, params?: object }
  * @param {object} values { threadId, messageId, parentId, tenantId }
@@ -1322,19 +1337,22 @@ function normalize(extraction, meta = {}, options = {}) {
  */
 function buildPermalink(config, values = {}) {
   if (!config || !config.base) return null;
-  const base = fillTemplate(config.base, values);
+  const base = fillTemplate(config.base, values, false);
   if (base == null) return null;
 
   const query = Object.entries(config.params || {})
-    .map(([key, template]) => [key, fillTemplate(template, values)])
+    .map(([key, template]) => [key, fillTemplate(template, values, true)])
     .filter(([, value]) => value != null && value !== '')
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+    .map(([key, value]) => `${key}=${value}`);
 
   return query.length > 0 ? `${base}?${query.join('&')}` : base;
 }
 
-/** '{a}/{b}' を values で埋める。埋まらないプレースホルダがあれば null。 */
-function fillTemplate(template, values) {
+/**
+ * '{a}/{b}' を values で埋める。埋まらないプレースホルダがあれば null。
+ * @param {boolean} encodeValues 埋めた値を URL エンコードするか（地の文は常にそのまま）
+ */
+function fillTemplate(template, values, encodeValues) {
   if (typeof template !== 'string') return null;
   let missing = false;
   const filled = template.replace(/\{(\w+)\}/g, (_, key) => {
@@ -1343,7 +1361,7 @@ function fillTemplate(template, values) {
       missing = true;
       return '';
     }
-    return String(value);
+    return encodeValues ? encodeURIComponent(value) : String(value);
   });
   return missing ? null : filled;
 }
@@ -2511,11 +2529,20 @@ const SELECTORS = {
   },
 
   "permalink": {
-    "note": "個々のメッセージへのディープリンク。base のプレースホルダが 1 つでも埋まらなければリンクを作らない（推測で URL を組み立てない）。params は値が無いものを落とす。tenantId は DOM から確実に取れないため既定では付けない（options.tenantId で明示指定できる）。",
-    "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
-    "params": {
-      "tenantId": "{tenantId}",
-      "parentMessageId": "{parentId}"
+    "note": "個々のメッセージへのディープリンク。**チャネルとチャットで形が違う**ので会話種別ごとに分けてある。Teams の「リンクをコピー」が実際に出す URL に合わせること。base のプレースホルダが 1 つでも埋まらなければリンクを作らない（推測で URL を組み立てない）。params は値が無いものを落とす。テンプレートの地の文はそのまま出し、{…} に埋める値だけ URL エンコードする（Teams 実物の書き方を 1 文字も変えずに再現するため）。tenantId は DOM から確実に取れないため既定では付けない（options.tenantId で明示指定できる）。",
+    "channel": {
+      "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
+      "params": {
+        "tenantId": "{tenantId}",
+        "parentMessageId": "{parentId}"
+      }
+    },
+    "chat": {
+      "_status": "2026-08-13 に実機の「リンクをコピー」と突き合わせて確定。parentMessageId を付けるとデスクトップアプリが「チームを見つけることができません」になる（チャネル投稿として解釈されるため）。context の値は Teams 実物が ':' だけを %3A にした形なので、それをそのまま写している。",
+      "base": "https://teams.microsoft.com/l/message/{threadId}/{messageId}",
+      "params": {
+        "context": "{\"contextType\"%3A\"chat\"}"
+      }
     }
   },
 
@@ -2589,7 +2616,8 @@ if (!pane) {
     toolVersion: '0.1.0',
   }, {
     patterns: SELECTORS.patterns,
-    permalink: SELECTORS.permalink,
+    // リンクの形はチャネルとチャットで違う（チャットに parentMessageId を付けるとアプリが会話を見つけられない）
+    permalink: permalinkConfigFor(SELECTORS, profile),
     tenantId: options.tenantId || null,
     truncated: collected.truncated,
   });
