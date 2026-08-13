@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalize, parseConversationTitle } from '../src/normalize.js';
+import { normalize, parseConversationTitle, resolveConversationTitle } from '../src/normalize.js';
 import { buildFilename } from '../src/markdown-renderer.js';
 import { loadSelectors } from './fixtures.js';
 
@@ -48,6 +48,40 @@ test('会話を開いていないなど取り出せない場合は、埋めず�
   assert.equal(result.team, null);
   assert.equal(result.channel, null);
   assert.equal(result.warnings[0].code, 'conversation-title-unparsed');
+});
+
+/* ---- 候補が複数あるとき ----------------------------------------------- */
+
+/**
+ * 実機で観測した状況（2026-08-13）。ボタンを押した時点ではタイトルに会話名がまだ入っておらず、
+ * 収集が終わったあとに入った。開始時の値だけを見ていたため会話名を取り逃していた。
+ */
+test('開始時のタイトルに会話名が無ければ、終了時のタイトルで補う', () => {
+  const result = resolveConversationTitle(
+    ['(3) Planner | Microsoft Teams', '(3) Planner | ベトナム案件-DTSメンバのみ | Microsoft Teams'],
+    config,
+    'chat',
+  );
+  assert.equal(result.chatTitle, 'ベトナム案件-DTSメンバのみ');
+  assert.deepEqual(result.warnings, []);
+});
+
+test('両方で取れる場合は開始時のほうを採用する（収集開始時点の会話を正とする）', () => {
+  const result = resolveConversationTitle(
+    ['チャット | 収集した会話 | Microsoft Teams', 'チャット | あとで開いた別の会話 | Microsoft Teams'],
+    config,
+    'chat',
+  );
+  assert.equal(result.chatTitle, '収集した会話');
+});
+
+test('どの候補でも取れなければ、試した値を並べて警告する', () => {
+  const result = resolveConversationTitle(['Microsoft Teams', '(3) Planner | Microsoft Teams'], config, 'chat');
+  assert.equal(result.chatTitle, null);
+  assert.equal(result.warnings.length, 1);
+  assert.equal(result.warnings[0].code, 'conversation-title-unparsed');
+  assert.match(result.warnings[0].detail, /「Microsoft Teams」/);
+  assert.match(result.warnings[0].detail, /「\(3\) Planner \| Microsoft Teams」/);
 });
 
 /* ---- ファイル名まで --------------------------------------------------- */

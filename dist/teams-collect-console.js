@@ -1350,6 +1350,38 @@ function parseConversationTitle(title, config, profile) {
 }
 
 /**
+ * 複数のタイトル候補から会話名を解決する。
+ *
+ * Teams はタイトルの更新が遅れることがあり、収集を始めた時点では会話名がまだ入っていない
+ * （実機で `'(3) Planner | Microsoft Teams'` と、会話名を欠いた形を観測した）。
+ * そのため開始時と終了時の両方を候補にして、名前が取れたほうを採用する。
+ * 先に渡された候補を優先する（収集開始時点の会話を正とするため）。
+ *
+ * @param {Array<string>|string} titles 候補。並び順が優先順
+ */
+function resolveConversationTitle(titles, config, profile) {
+  const list = (Array.isArray(titles) ? titles : [titles]).filter(Boolean);
+  const tried = [];
+  let lastResult = { team: null, channel: null, chatTitle: null, warnings: [] };
+
+  for (const title of list) {
+    if (tried.includes(title)) continue;
+    tried.push(title);
+    const parsed = parseConversationTitle(title, config, profile);
+    if (parsed.team || parsed.channel || parsed.chatTitle) return parsed;
+    lastResult = parsed;
+  }
+
+  if (tried.length > 1 && lastResult.warnings.length > 0) {
+    lastResult.warnings = [{
+      ...lastResult.warnings[0],
+      detail: `画面のタイトルから会話名を取り出せませんでした（試した値: ${tried.map((t) => `「${t}」`).join(' / ')}）。ファイル名は既定の名前になります`,
+    }];
+  }
+  return lastResult;
+}
+
+/**
  * 会話種別に対応するリンク設定を取り出す。チャネルとチャットで URL の形が違う。
  * @returns {object|null}
  */
@@ -2420,10 +2452,13 @@ async function runExport(selectors, options) {
   }
 
   const startedAt = new Date();
-  // 会話名はタブのタイトルから取る。収集中に未読数などで変わりうるので開始時点の値を使う
-  const titleMeta = parseConversationTitle(document.title, selectors.conversationTitle, profile);
+  // 会話名はタブのタイトルから取る。ただし Teams は更新が遅れることがあり、開始時点では
+  // 会話名が入っていない場合がある（実機で観測）。開始時と終了時の両方を候補にする。
+  const titleAtStart = document.title;
 
   const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile }));
+
+  const titleMeta = resolveConversationTitle([titleAtStart, document.title], selectors.conversationTitle, profile);
 
   // 会話 ID は入力欄の送信ボタンなど「ペインの外」にあるので document.body から探す。
   // 本文に貼られた他会話のリンクを拾わないよう、専用の属性を持つ要素だけを見ている。

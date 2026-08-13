@@ -38,10 +38,13 @@ async function runExport(selectors, options) {
   }
 
   const startedAt = new Date();
-  // 会話名はタブのタイトルから取る。収集中に未読数などで変わりうるので開始時点の値を使う
-  const titleMeta = parseConversationTitle(document.title, selectors.conversationTitle, profile);
+  // 会話名はタブのタイトルから取る。ただし Teams は更新が遅れることがあり、開始時点では
+  // 会話名が入っていない場合がある（実機で観測）。開始時と終了時の両方を候補にする。
+  const titleAtStart = document.title;
 
   const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile }));
+
+  const titleMeta = resolveConversationTitle([titleAtStart, document.title], selectors.conversationTitle, profile);
 
   // 会話 ID は入力欄の送信ボタンなど「ペインの外」にあるので document.body から探す。
   // 本文に貼られた他会話のリンクを拾わないよう、専用の属性を持つ要素だけを見ている。
