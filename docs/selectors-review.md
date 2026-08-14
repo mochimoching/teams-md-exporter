@@ -150,6 +150,9 @@ tools/browser-runtime.js      ブラウザ側の共通グルー。document/windo
 tools/build-userscript.js     ユーザースクリプトを生成 → docs/userscript.md
 tools/userscript-ui.js        ユーザースクリプトの UI（右下のボタン）
 tools/build-console-script.js コンソール貼り付け用の 1 ファイルを生成 → docs/try-it.md
+tools/schedule-core.js        スケジュール実行の判断ロジック（純粋関数）→ docs/scheduled.md
+tools/scheduled-export.js     スケジュール実行の本体（Playwright / 仕様書 §7.1）
+tools/scheduled-login.js      専用プロファイルへのログイン（人が行う。認証情報は保存しない）
 tools/collect-dom-samples.js  DOM サンプル採取（ブラウザのコンソールに貼る）
 tools/check-samples.js        全サンプルでの命中率レポート
 ```
@@ -162,7 +165,7 @@ tools/check-samples.js        全サンプルでの命中率レポート
 - セレクタは **コード内に一切書かない**（`tests/selectors-policy.test.js` が `src/` を機械検査）。
 - 取りこぼし・欠落は必ず `warnings[]` に積む（`fatal` / `warn` / `info`）。抽出 0 件は fatal。
 
-### テスト（`npm test`: 112 件）
+### テスト（`npm test`: 131 件）
 
 採取した実 DOM をそのまま読み込んで検証しています（テスト用に HTML を書き換えていない）。
 件数の固定値はサンプルを採り直すと変わるため、原則は「全件で取れていること」を検査しています。
@@ -185,6 +188,7 @@ tools/check-samples.js        全サンプルでの命中率レポート
 |---|---|
 | 返信スレッドの回収（`expandReplies: true`）の実機検証 | **保留**（2026-08-13・利用者判断）。既定 false で運用する。再開時の確認手順は `docs/scroll-driver.md` の「課題: 返信スレッドの回収は未検証」に記載 |
 | ユーザースクリプト（Tampermonkey）としてのパッケージ化 | **完了**。実機で、ボタンの表示から保存まで通ることを確認済み（2026-08-13 / `dist/teams-md-exporter.user.js` / `docs/userscript.md`） |
+| スケジュール実行（Playwright / §7.1） | **実装済み**（`docs/scheduled.md`）。**実機での確認は未実施**。左一覧から会話を選ぶセレクタ（`navigation.conversationListItem`）が未検証で、効かない場合は `current: true` で回避できる |
 | 設定 UI（§7-2 の取得範囲の選択） | **完了**。取得範囲（全件 / 直近N日 / 指定日以降）とシステムメッセージ除外可否を選べる。設定どおりに取得できることを実機で確認済み（2026-08-14 / `docs/userscript.md`） |
 
 ---

@@ -9,9 +9,12 @@
     "build": "npm run build:userscript && npm run build:console",
     "build:userscript": "node tools/build-userscript.js",
     "build:console": "node tools/build-console-script.js",
-    "check-samples": "node tools/check-samples.js"
+    "check-samples": "node tools/check-samples.js",
+    "schedule:login": "node tools/scheduled-login.js",
+    "schedule": "node tools/scheduled-export.js"
   },
   "devDependencies": {
-    "jsdom": "^26.0.0"
+    "jsdom": "^26.0.0",
+    "playwright-core": "^1.62.1"
   }
 }

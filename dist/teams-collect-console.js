@@ -2768,6 +2768,12 @@ const SELECTORS = {
     "skipImageUrl": "^blob:"
   },
 
+  "navigation": {
+    "note": "スケジュール実行（Playwright 版）で、左の一覧から対象の会話を開くためのセレクタ。{threadId} は対象の会話 ID に置換される。ブラウザ内実行では使わない（人が開いた会話をそのまま取るため）。",
+    "_status": "**未確定**。2026-08-13 のコンソール調査で、左一覧の項目が data-fui-tree-item-value に会話 ID を持つことは確認した（DIV.data-fui-tree-item-value に 19:…@… が入っていた）。ただし、それをクリックして会話が開くかは未検証。効かない場合は target に current: true を指定すれば、開いている会話をそのまま取れる。",
+    "conversationListItem": "[data-fui-tree-item-value=\"{threadId}\"]"
+  },
+
   "conversationTitle": {
     "note": "会話名は画面（ブラウザのタブ）のタイトルから取る。2026-08-13 実測: チャネル '(3) チームとチャネル | DTS | 911_プロパー(星野PL-R＆D) | Microsoft Teams' / チャット '(3) チャット | ベトナム案件-DTSメンバのみ | Microsoft Teams'。先頭はアプリ内のセクション名（未読数 '(3) ' が付くことがある）、末尾はアプリ名で、どちらも UI 言語依存。そのため文字列一致ではなく位置で落とす。会話名自体に区切り文字が含まれる場合は、最後のフィールドに区切りごと戻して入れる（チーム名に含まれる場合だけは分離できない）。",
     "separator": " | ",

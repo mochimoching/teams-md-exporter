@@ -1,0 +1,34 @@
+{
+  "_note": "schedule.config.json としてコピーし、自分の環境に合わせて書き換えてください。実際の設定ファイルは .gitignore で除外しています（保存先に組織固有の情報や会話 ID が入るため）。詳しくは docs/scheduled.md。",
+
+  "profileDir": "C:/Users/hkita/teams-md-exporter/profile",
+  "outDir": "C:/Users/hkita/teams-md-exporter/exports",
+  "stateFile": "C:/Users/hkita/teams-md-exporter/schedule.state.json",
+  "logFile": "C:/Users/hkita/teams-md-exporter/schedule.log.jsonl",
+
+  "_collect": "収集の上限。無人実行なので、ブラウザ内実行より余裕を持たせてよい",
+  "collect": {
+    "maxSteps": 400,
+    "maxDurationMs": 600000
+  },
+
+  "_overlapMinutes": "差分取得の巻き戻し幅（分）。前回時刻ちょうどから取ると取りこぼすので少し重ねる。重複したメッセージは ID で一意化される",
+  "overlapMinutes": 60,
+
+  "_betweenTargetsMs": "会話を切り替えるまでの待ち。低頻度・逐次アクセスのため（仕様書 §7.1）",
+  "betweenTargetsMs": 10000,
+
+  "_targets": "取得対象。threadId は、一度書き出した .md のフロントマター thread_id からコピーできる。mode は incremental（前回以降）か full（毎回全件）",
+  "targets": [
+    {
+      "name": "DTS / 911_プロパー",
+      "threadId": "19:5bd8f4d415f642f1949fbe396f62ff4d@thread.tacv2",
+      "mode": "incremental"
+    },
+    {
+      "name": "いま開いている会話",
+      "current": true,
+      "mode": "full"
+    }
+  ]
+}
