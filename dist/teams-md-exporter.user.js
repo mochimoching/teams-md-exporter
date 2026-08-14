@@ -226,7 +226,13 @@ const SELECTORS = {
   "navigation": {
     "note": "スケジュール実行（Playwright 版）で、左の一覧から対象の会話を開くためのセレクタ。{threadId} は対象の会話 ID に置換される。ブラウザ内実行では使わない（人が開いた会話をそのまま取るため）。",
     "_status": "**未確定**。2026-08-13 のコンソール調査で、左一覧の項目が data-fui-tree-item-value に会話 ID を持つことは確認した（DIV.data-fui-tree-item-value に 19:…@… が入っていた）。ただし、それをクリックして会話が開くかは未検証。効かない場合は target に current: true を指定すれば、開いている会話をそのまま取れる。",
-    "conversationListItem": "[data-fui-tree-item-value=\"{threadId}\"]"
+    "_switchNote": "threadId の種別に応じてアプリビューを切り替えるための任意セレクタ。未設定時は aria-label（チーム/チャット + Ctrl+Shift）とキーボードショートカットでフォールバックする。",
+    "conversationListItem": [
+      "[data-fui-tree-item-value=\"{threadId}\"]",
+      "[data-fui-tree-item-value$=\"|{threadId}\"]"
+    ],
+    "appSwitchTeamsButton": [],
+    "appSwitchChatButton": []
   },
 
   "conversationTitle": {
@@ -1208,7 +1214,7 @@ function resolveMessageId(unit, sel, warnings) {
     textOf(queryFirst(unit, sel.author)),
     textOf(queryFirst(unit, sel.timestamp)),
     textOf(queryFirst(unit, sel.body)),
-  ].join('');
+  ].join('');
   warnings.push({
     level: 'warn',
     code: 'synthetic-id',
@@ -2781,20 +2787,21 @@ async function runExport(selectors, options) {
   const collected = await collectByScrolling(pane, selectors, Object.assign({}, options, { profile, capturedAt }));
 
   const titleMeta = resolveConversationTitle([titleAtStart, document.title], selectors.conversationTitle, profile);
+  const titleMetaWithFallback = applyConversationTitleFallback(titleMeta, profile, options && options.titleFallback);
 
   // 会話 ID は入力欄の送信ボタンなど「ペインの外」にあるので document.body から探す。
   // 本文に貼られた他会話のリンクを拾わないよう、専用の属性を持つ要素だけを見ている。
   const conversation = extractConversationId(document.body, selectors, { profile });
   conversation.warnings.forEach((w) => collected.warnings.push(w));
-  titleMeta.warnings.forEach((w) => collected.warnings.push(w));
+  titleMetaWithFallback.warnings.forEach((w) => collected.warnings.push(w));
 
   const model = normalize(collected, {
     kind: profile,
     url: location.href,
     threadId: conversation.threadId,
-    team: titleMeta.team,
-    channel: titleMeta.channel,
-    chatTitle: titleMeta.chatTitle,
+    team: titleMetaWithFallback.team,
+    channel: titleMetaWithFallback.channel,
+    chatTitle: titleMetaWithFallback.chatTitle,
     capturedAt,
     toolVersion: options.toolVersion || null,
   }, {
@@ -2812,6 +2819,59 @@ async function runExport(selectors, options) {
 
   const { files } = renderMarkdownFiles(model, options);
   return { model, files, profile };
+}
+
+function applyConversationTitleFallback(titleMeta, profile, fallbackInput) {
+  const meta = {
+    ...titleMeta,
+    warnings: Array.isArray(titleMeta && titleMeta.warnings) ? [...titleMeta.warnings] : [],
+  };
+  const fallback = fallbackInput && typeof fallbackInput === 'object' ? fallbackInput : {};
+
+  // 左一覧で拾えた文字列を最優先。次に target.name / displayName の順で使う。
+  const candidates = [
+    { source: 'list-text', value: normalizeTitleCandidate(fallback.listText) },
+    { source: 'target-name', value: normalizeTitleCandidate(fallback.targetName) },
+    { source: 'display-name', value: normalizeTitleCandidate(fallback.displayName) },
+  ].filter((c) => c.value);
+
+  if (profile === 'chat' && !meta.chatTitle) {
+    const picked = candidates[0];
+    if (picked) {
+      meta.chatTitle = picked.value;
+      meta.warnings.push({
+        level: 'info',
+        code: 'conversation-title-fallback',
+        detail: `タブタイトルから会話名を取れなかったため、${picked.source} を会話名として使用しました`,
+      });
+    }
+  }
+
+  if (profile === 'channel' && !meta.channel) {
+    const picked = candidates[0];
+    if (picked) {
+      meta.channel = picked.value;
+      meta.warnings.push({
+        level: 'info',
+        code: 'conversation-title-fallback',
+        detail: `タブタイトルからチャネル名を取れなかったため、${picked.source} をチャネル名として使用しました`,
+      });
+    }
+  }
+
+  return meta;
+}
+
+function normalizeTitleCandidate(value) {
+  if (!value) return null;
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+
+  // 左一覧の行テキストには時刻・抜粋が続くことがあるため、会話名部分を先頭寄りで切る。
+  const m = text.match(/^(.*?)(?:\b\d{1,2}:\d{2}\b|\b\d{1,2}\/\d{1,2}\b|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日|日曜日|今日|昨日)/);
+  const head = m && m[1] ? m[1].trim() : text;
+  const cleaned = head.replace(/^未読です\s*/, '').trim();
+  return cleaned || null;
 }
 
 /** Blob を作ってダウンロードさせる。ネットワークへは出ない */

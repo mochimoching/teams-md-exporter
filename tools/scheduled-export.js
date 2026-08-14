@@ -119,7 +119,21 @@ async function openTeams(page) {
 /** 1 会話ぶん: 会話を開く → 収集スクリプトを流し込む → 結果を受け取る */
 async function runTarget(page, target, since) {
   try {
-    if (!target.current) await selectConversation(page, target);
+    let selectFallbackReason = null;
+    let selectionMeta = null;
+    if (!target.current) {
+      try {
+        selectionMeta = await selectConversation(page, target);
+      } catch (error) {
+        const currentThreadId = await getCurrentThreadId(page);
+        if (currentThreadId && currentThreadId === target.threadId) {
+          selectFallbackReason = `左一覧の選択は失敗したため、現在開いている会話（threadId 一致: ${currentThreadId}）を使用しました`;
+          log(selectFallbackReason);
+        } else {
+          throw error;
+        }
+      }
+    }
     await page.waitForTimeout(config.settleMs);
 
     const options = {
@@ -127,6 +141,11 @@ async function runTarget(page, target, since) {
       ...(target.collect || {}),
       stopBefore: since,
       includeSystem: target.includeSystem === true,
+      titleFallback: {
+        targetName: target.name || null,
+        displayName: target.displayName || null,
+        listText: selectionMeta && selectionMeta.listText ? selectionMeta.listText : null,
+      },
     };
 
     await page.evaluate((opts) => {
@@ -142,6 +161,7 @@ async function runTarget(page, target, since) {
     const model = await page.evaluate(() => window.TEAMS_RESULT);
     const files = (await page.evaluate(() => window.TEAMS_FILES)) || [];
     const { status, reasons } = classifyRun(model);
+    if (selectFallbackReason) reasons.unshift(selectFallbackReason);
 
     // 新着が無いときは空ファイルを作らない（差分取得では正常な結果）
     return { status, reasons, model, files: status === 'empty' ? [] : files };
@@ -161,14 +181,236 @@ async function selectConversation(page, target) {
     throw new Error('selectors.json の navigation.conversationListItem が未設定のため、会話を選べません（target に current: true を指定すれば、開いている会話をそのまま取れます）');
   }
 
-  const candidates = templates.map((t) => t.replace('{threadId}', cssEscape(target.threadId)));
-  for (const selector of candidates) {
-    const item = page.locator(selector).first();
-    if (await item.count() === 0) continue;
-    await item.click();
-    return;
+  const candidates = buildConversationSelectors(templates, target.threadId);
+  await waitForConversationListHydration(page, nav);
+
+  const fromCandidates = await trySelectByCandidates(page, candidates, target.threadId);
+  if (fromCandidates) return fromCandidates;
+
+  const desiredView = desiredAppViewForThread(target.threadId);
+  if (desiredView) {
+    const switched = await switchConversationAppView(page, desiredView, nav);
+    if (switched) {
+      await waitForConversationListHydration(page, nav);
+      const fromSwitched = await trySelectByCandidates(page, candidates, target.threadId);
+      if (fromSwitched) return fromSwitched;
+    }
   }
-  throw new Error(`左の一覧に会話 ${target.threadId} が見つかりませんでした（一覧に表示されている必要があります）`);
+
+  if (target.displayName) {
+    const byName = await clickConversationByName(page, target.displayName, target.threadId);
+    if (byName) return byName;
+    const bySearch = await searchConversationAndSelect(page, target, candidates, nav);
+    if (bySearch) return bySearch;
+  }
+
+  const debug = await collectConversationListDebug(page, target.threadId);
+  throw new Error([
+    `左の一覧に会話 ${target.threadId} が見つかりませんでした（一覧に表示されている必要があります）`,
+    `試行セレクタ数: ${candidates.length}`,
+    `左一覧の data-fui-tree-item-value: 合計=${debug.total}, 一意=${debug.unique}, 完全一致=${debug.hasExact ? 'あり' : 'なし'}, 部分一致=${debug.contains.length}`,
+    debug.contains.length > 0 ? `部分一致サンプル: ${debug.contains.join(' | ')}` : '',
+  ].filter(Boolean).join(' / '));
+}
+
+async function trySelectByCandidates(page, candidates, threadId) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    for (const selector of candidates) {
+      // 先に visible を優先する。仮想リストで非表示ノードが混ざるため。
+      const visible = page.locator(`${selector}:visible`).first();
+      if (await visible.count() > 0) {
+        const listText = simplifyListText(await visible.textContent().catch(() => null));
+        if (await clickAndConfirm(page, visible, threadId)) return { listText };
+      }
+
+      const item = page.locator(selector).first();
+      if (await item.count() > 0) {
+        const listText = simplifyListText(await item.textContent().catch(() => null));
+        if (await clickAndConfirm(page, item, threadId)) return { listText };
+      }
+    }
+
+    if (attempt < 5) await page.waitForTimeout(800);
+  }
+  return null;
+}
+
+function desiredAppViewForThread(threadId) {
+  const id = String(threadId || '');
+  if (id.includes('@thread.tacv2') || id.includes('@thread.skype')) return 'teams';
+  if (id.includes('@thread.v2') || id.includes('@unq.gbl.spaces')) return 'chat';
+  return null;
+}
+
+async function clickAndConfirm(page, locator, threadId) {
+  await locator.click();
+  return waitForTargetThread(page, threadId, 5000);
+}
+
+async function waitForTargetThread(page, threadId, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const current = await getCurrentThreadId(page);
+    if (current === threadId) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
+async function switchConversationAppView(page, view, nav) {
+  const selectors = view === 'teams'
+    ? selectorList(nav.appSwitchTeamsButton)
+    : selectorList(nav.appSwitchChatButton);
+
+  const defaultByAria = view === 'teams'
+    ? [
+        "button[aria-label*='チーム (Ctrl+Shift+3)']",
+        "button[aria-label*='Teams (Ctrl+Shift+3)']",
+      ]
+    : [
+        "button[aria-label*='チャット (Ctrl+Shift+2)']",
+        "button[aria-label*='Chat (Ctrl+Shift+2)']",
+      ];
+
+  for (const selector of [...new Set([...selectors, ...defaultByAria])]) {
+    const button = page.locator(`${selector}:visible`).first();
+    if (await button.count() === 0) continue;
+    try {
+      await button.click({ timeout: 2500 });
+      await page.waitForTimeout(1500);
+      return true;
+    } catch {
+      continue;
+    }
+  }
+
+  // 最後の保険。ショートカットは Teams の既定に依存するため、クリック候補が無い場合のみ使う。
+  try {
+    await page.keyboard.press(view === 'teams' ? 'Control+Shift+3' : 'Control+Shift+2');
+    await page.waitForTimeout(1500);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildConversationSelectors(templates, threadId) {
+  const escaped = cssEscape(threadId);
+  const rendered = templates.map((t) => t.replace('{threadId}', escaped));
+  const fallback = [
+    `[data-fui-tree-item-value="${escaped}"]`,
+    `[data-fui-tree-item-value$="|${escaped}"]`,
+    `[data-fui-tree-item-value*="${escaped}"]`,
+  ];
+  return [...new Set([...rendered, ...fallback])];
+}
+
+async function clickConversationByName(page, displayName, threadId) {
+  const candidate = page.locator(`[data-fui-tree-item-value]:visible`, {
+    hasText: displayName,
+  }).first();
+  if (await candidate.count() > 0) {
+    const listText = simplifyListText(await candidate.textContent().catch(() => null));
+    if (await clickAndConfirm(page, candidate, threadId)) return { listText };
+  }
+
+  // テキストを持つコンテナ側に data-fui-tree-item-value が付いていない場合の保険。
+  const fallback = page.locator(`:is([role='treeitem'], [role='listitem'], [data-fui-tree-item-value]):visible`, {
+    hasText: displayName,
+  }).first();
+  if (await fallback.count() > 0) {
+    const listText = simplifyListText(await fallback.textContent().catch(() => null));
+    if (await clickAndConfirm(page, fallback, threadId)) return { listText };
+  }
+  return null;
+}
+
+async function searchConversationAndSelect(page, target, candidates, nav) {
+  const searchInputs = selectorList(nav.conversationSearchInput);
+  if (searchInputs.length === 0) return false;
+  const selectorsToTry = [...new Set(searchInputs)];
+
+  for (const inputSelector of selectorsToTry) {
+    const input = page.locator(inputSelector).first();
+    if (await input.count() === 0) continue;
+
+    try {
+      await input.click({ timeout: 2000 });
+      await input.fill(target.displayName);
+      await input.press('Enter');
+      await page.waitForTimeout(1500);
+
+      await waitForConversationListHydration(page, nav);
+
+      for (const selector of candidates) {
+        const visible = page.locator(`${selector}:visible`).first();
+        if (await visible.count() > 0) {
+          await visible.click();
+          return true;
+        }
+      }
+
+      const byName = await clickConversationByName(page, target.displayName, target.threadId);
+      if (byName) return byName;
+    } catch {
+      // 入力欄の性質が画面状態で変わることがあるため、次候補を試す。
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function waitForConversationListHydration(page, nav) {
+  const readySelectors = selectorList(nav.conversationListReady).length > 0
+    ? selectorList(nav.conversationListReady)
+    : ["[data-fui-tree-item-value]", "[role='treeitem']", "[role='listitem']"];
+
+  const timeoutMs = Number.isFinite(nav.conversationListReadyTimeoutMs)
+    ? Math.max(0, nav.conversationListReadyTimeoutMs)
+    : 10000;
+
+  try {
+    await page.waitForFunction(
+      (selectorsIn) => selectorsIn.some((selector) => document.querySelector(selector)),
+      readySelectors,
+      { timeout: timeoutMs },
+    );
+  } catch {
+    // 描画待ちに失敗しても探索は続行し、最終エラーに診断情報を含める。
+  }
+}
+
+async function collectConversationListDebug(page, threadId) {
+  return page.evaluate((id) => {
+    const values = Array.from(document.querySelectorAll('[data-fui-tree-item-value]'))
+      .map((n) => n.getAttribute('data-fui-tree-item-value'))
+      .filter(Boolean);
+    const unique = [...new Set(values)];
+    return {
+      total: values.length,
+      unique: unique.length,
+      hasExact: unique.includes(id),
+      contains: unique.filter((v) => v.includes(id)).slice(0, 5),
+    };
+  }, threadId);
+}
+
+async function getCurrentThreadId(page) {
+  const hosts = [
+    ...selectorList(selectors.profiles.channel.conversationIdHost),
+    ...selectorList(selectors.profiles.chat.conversationIdHost),
+  ];
+  const attr = selectors.profiles.channel.conversationIdAttr || selectors.profiles.chat.conversationIdAttr || 'data-track-thread-id';
+  if (hosts.length === 0) return null;
+
+  return page.evaluate(({ hostsIn, attrIn }) => {
+    const values = hostsIn
+      .flatMap((selector) => Array.from(document.querySelectorAll(selector)).map((el) => el.getAttribute(attrIn)))
+      .filter(Boolean);
+    const unique = [...new Set(values)];
+    return unique.length === 1 ? unique[0] : null;
+  }, { hostsIn: hosts, attrIn: attr });
 }
 
 /* ---- 小物 ----------------------------------------------------------- */
@@ -205,6 +447,14 @@ function selectorList(value) {
 /** 属性セレクタに埋め込むためのエスケープ（会話 ID に ':' や '@' が含まれる） */
 function cssEscape(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function simplifyListText(text) {
+  if (!text) return null;
+  const oneLine = String(text).replace(/\s+/g, ' ').trim();
+  if (!oneLine) return null;
+  const cleaned = oneLine.replace(/^未読です\s*/, '');
+  return cleaned.slice(0, 120);
 }
 
 function readJson(file) {
