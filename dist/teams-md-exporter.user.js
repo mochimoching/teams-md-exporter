@@ -225,7 +225,7 @@ const SELECTORS = {
 
   "navigation": {
     "note": "スケジュール実行（Playwright 版）で、左の一覧から対象の会話を開くためのセレクタ。{threadId} は対象の会話 ID に置換される。ブラウザ内実行では使わない（人が開いた会話をそのまま取るため）。",
-    "_status": "**未確定**。2026-08-13 のコンソール調査で、左一覧の項目が data-fui-tree-item-value に会話 ID を持つことは確認した（DIV.data-fui-tree-item-value に 19:…@… が入っていた）。ただし、それをクリックして会話が開くかは未検証。効かない場合は target に current: true を指定すれば、開いている会話をそのまま取れる。",
+    "_status": "**2026-08-19 に実機で確認済み**。左一覧の項目は data-fui-tree-item-value に会話 ID を持ち、クリックで会話が切り替わる。ただし一発で決まらない場面があるため、scheduled-export.js 側で段階的に手を尽くしている（末尾一致・部分一致 / 描画待ちのリトライ / アプリビュー切替 / 表示名・検索欄）。クリック後は data-track-thread-id が対象の ID になるまで待って切り替わりを確認する（押せたことを成功と見なさない）。詳細は docs/scheduled.md「会話の選び方」。",
     "_switchNote": "threadId の種別に応じてアプリビューを切り替えるための任意セレクタ。未設定時は aria-label（チーム/チャット + Ctrl+Shift）とキーボードショートカットでフォールバックする。",
     "conversationListItem": [
       "[data-fui-tree-item-value=\"{threadId}\"]",
@@ -1214,7 +1214,7 @@ function resolveMessageId(unit, sel, warnings) {
     textOf(queryFirst(unit, sel.author)),
     textOf(queryFirst(unit, sel.timestamp)),
     textOf(queryFirst(unit, sel.body)),
-  ].join('');
+  ].join('');
   warnings.push({
     level: 'warn',
     code: 'synthetic-id',
@@ -2827,12 +2827,15 @@ function applyConversationTitleFallback(titleMeta, profile, fallbackInput) {
     warnings: Array.isArray(titleMeta && titleMeta.warnings) ? [...titleMeta.warnings] : [],
   };
   const fallback = fallbackInput && typeof fallbackInput === 'object' ? fallbackInput : {};
+  const normalizedTarget = normalizeTitleCandidate(fallback.targetName);
+  const normalizedDisplay = normalizeTitleCandidate(fallback.displayName);
+  const normalizedList = normalizeTitleCandidate(fallback.listText, [normalizedTarget, normalizedDisplay].filter(Boolean));
 
-  // 左一覧で拾えた文字列を最優先。次に target.name / displayName の順で使う。
+  // ターゲット設定値を最優先にし、左一覧テキストは補助として使う。
   const candidates = [
-    { source: 'list-text', value: normalizeTitleCandidate(fallback.listText) },
-    { source: 'target-name', value: normalizeTitleCandidate(fallback.targetName) },
-    { source: 'display-name', value: normalizeTitleCandidate(fallback.displayName) },
+    { source: 'target-name', value: normalizedTarget },
+    { source: 'display-name', value: normalizedDisplay },
+    { source: 'list-text', value: normalizedList },
   ].filter((c) => c.value);
 
   if (profile === 'chat' && !meta.chatTitle) {
@@ -2862,13 +2865,17 @@ function applyConversationTitleFallback(titleMeta, profile, fallbackInput) {
   return meta;
 }
 
-function normalizeTitleCandidate(value) {
+function normalizeTitleCandidate(value, hints = []) {
   if (!value) return null;
   const text = String(value).replace(/\s+/g, ' ').trim();
   if (!text) return null;
 
+  for (const hint of hints) {
+    if (hint && text.includes(hint)) return hint;
+  }
+
   // 左一覧の行テキストには時刻・抜粋が続くことがあるため、会話名部分を先頭寄りで切る。
-  const m = text.match(/^(.*?)(?:\b\d{1,2}:\d{2}\b|\b\d{1,2}\/\d{1,2}\b|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日|日曜日|今日|昨日)/);
+  const m = text.match(/^(.*?)(?:\d{1,2}:\d{2}|\d{1,2}\/\d{1,2}|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日|日曜日|今日|昨日)/);
   const head = m && m[1] ? m[1].trim() : text;
   const cleaned = head.replace(/^未読です\s*/, '').trim();
   return cleaned || null;

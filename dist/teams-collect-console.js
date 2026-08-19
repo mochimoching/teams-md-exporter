@@ -941,7 +941,7 @@ function resolveMessageId(unit, sel, warnings) {
     textOf(queryFirst(unit, sel.author)),
     textOf(queryFirst(unit, sel.timestamp)),
     textOf(queryFirst(unit, sel.body)),
-  ].join('');
+  ].join('');
   warnings.push({
     level: 'warn',
     code: 'synthetic-id',
@@ -2831,7 +2831,7 @@ const SELECTORS = {
 
   "navigation": {
     "note": "スケジュール実行（Playwright 版）で、左の一覧から対象の会話を開くためのセレクタ。{threadId} は対象の会話 ID に置換される。ブラウザ内実行では使わない（人が開いた会話をそのまま取るため）。",
-    "_status": "**未確定**。2026-08-13 のコンソール調査で、左一覧の項目が data-fui-tree-item-value に会話 ID を持つことは確認した（DIV.data-fui-tree-item-value に 19:…@… が入っていた）。ただし、それをクリックして会話が開くかは未検証。効かない場合は target に current: true を指定すれば、開いている会話をそのまま取れる。",
+    "_status": "**2026-08-19 に実機で確認済み**。左一覧の項目は data-fui-tree-item-value に会話 ID を持ち、クリックで会話が切り替わる。ただし一発で決まらない場面があるため、scheduled-export.js 側で段階的に手を尽くしている（末尾一致・部分一致 / 描画待ちのリトライ / アプリビュー切替 / 表示名・検索欄）。クリック後は data-track-thread-id が対象の ID になるまで待って切り替わりを確認する（押せたことを成功と見なさない）。詳細は docs/scheduled.md「会話の選び方」。",
     "_switchNote": "threadId の種別に応じてアプリビューを切り替えるための任意セレクタ。未設定時は aria-label（チーム/チャット + Ctrl+Shift）とキーボードショートカットでフォールバックする。",
     "conversationListItem": [
       "[data-fui-tree-item-value=\"{threadId}\"]",
