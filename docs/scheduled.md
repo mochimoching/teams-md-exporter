@@ -75,6 +75,42 @@ npm run schedule
 
 `outDir` に `.md` ができ、最後にサマリが出れば成功。**タスクに登録する前に必ず 1 回手で確かめること。**
 
+## 設定ファイルを指定して実行する
+
+引数を省くとリポジトリ直下の `schedule.config.json` を使う。別の場所・別の名前のファイルを使うときは
+第 1 引数で渡す。
+
+npm 経由の場合は **`--` を挟む**（前後は半角スペース）。`--` は「ここから先は npm ではなく
+スクリプトへの引数」という区切りで、これが無いと npm 自身のオプションとして解釈され、
+スクリプトには届かない。
+
+```
+npm run schedule -- C:/mytk/config/schedule.work.json
+npm run schedule:login -- C:/mytk/config/schedule.work.json
+```
+
+| 書き方 | 結果 |
+|---|---|
+| `npm run schedule -- config.json` | 正しい |
+| `npm run schedule --config.json` | npm のオプション扱いになり、スクリプトに渡らない |
+| `npm run schedule config.json` | npm の版によっては渡らない。`--` を付けるのが確実 |
+
+`--` の扱いを気にせずに済むので、直接呼ぶほうが確実。
+
+```
+node tools/scheduled-export.js C:/mytk/config/schedule.work.json
+```
+
+相対パスはカレントディレクトリ基準で解決される。
+
+### 設定ファイルを複数に分ける
+
+対象や頻度の違うジョブ（毎日の差分取得と、週次の全件取得など）は、設定ファイルを分けて
+それぞれタスクに登録する。
+
+そのとき **`stateFile` と `logFile` も必ず分けること。** 同じ状態ファイルを共有すると、
+片方の実行が他方の差分取得の起点を動かしてしまい、取りこぼしが起きる。
+
 ## タスクスケジューラに登録する
 
 Windows のタスクスケジューラで「基本タスクの作成」。
@@ -82,7 +118,7 @@ Windows のタスクスケジューラで「基本タスクの作成」。
 | 項目 | 値 |
 |---|---|
 | プログラム | `node`（または `C:\Program Files\nodejs\node.exe`） |
-| 引数 | `tools\scheduled-export.js` |
+| 引数 | `tools\scheduled-export.js`（設定ファイルを指定するなら `tools\scheduled-export.js C:\mytk\config\schedule.work.json`） |
 | 開始（作業フォルダ） | `C:\mytk\git\randd\teams-md-exporter` |
 
 - **「ユーザーがログオンしているときのみ実行する」を選ぶ。** ブラウザに画面が要る
